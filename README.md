@@ -66,6 +66,12 @@ src/
 
 ## 📦 Install
 
+### Quick install script
+```
+curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
+```
+
+### Manual
 **Prerequisites:** Go 1.21+, a C compiler (for SQLite)
 
 ```bash
