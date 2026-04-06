@@ -27,11 +27,11 @@ var readCmd = &cobra.Command{
 	Long: `Reads source files with optional language-aware filtering to strip boilerplate.
 
 Filter levels:
-  minimal (default)  — full content, no filtering (matches rtk none)
-  moderate           — strip comments and collapse blank lines (matches rtk minimal)
+  minimal (default)  — full content, no filtering
+  moderate           — strip comments and collapse blank lines
   aggressive         — signatures only (func, type, struct, class, etc.)
 
-Use -n to add line numbers (off by default, matches rtk).
+Use -n to add line numbers (off by default).
 
 Use "-" or omit file to read from stdin.`,
 	Args: cobra.MaximumNArgs(1),
@@ -42,7 +42,7 @@ func init() {
 	readCmd.Flags().StringVarP(&readLevel, "level", "l", "", "Filter level: minimal, moderate, aggressive")
 	readCmd.Flags().IntVarP(&readMax, "max-lines", "m", 0, "Show only first N lines (smart truncation)")
 	readCmd.Flags().IntVarP(&readTail, "tail", "t", 0, "Show only last N lines")
-	readCmd.Flags().BoolVarP(&readLineNum, "numbers", "n", false, "Show line numbers (default off, matches rtk)")
+	readCmd.Flags().BoolVarP(&readLineNum, "numbers", "n", false, "Show line numbers (default off)")
 	readCmd.Flags().CountVarP(&readVerbose, "verbose", "v", "Verbose output (-v, -vv)")
 	rootCmd.AddCommand(readCmd)
 }

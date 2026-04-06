@@ -24,7 +24,7 @@ func init() {
 	rootCmd.AddCommand(treeCmd)
 }
 
-// noiseDirs are excluded by default (same list as rtk)
+// noiseDirs are excluded by default
 var noiseDirs = []string{
 	"node_modules", ".git", "target", "__pycache__", ".next", "dist",
 	"build", ".cache", ".turbo", ".vercel", ".pytest_cache", ".mypy_cache",

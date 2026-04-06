@@ -114,7 +114,7 @@ func isInlineValue(v interface{}) bool {
 	return false
 }
 
-// compactJSON renders a value as a compact string (rtk-style).
+// compactJSON renders a value as a compact string.
 func compactJSON(v interface{}, depth, maxDepth int) string {
 	indent := strings.Repeat("  ", depth)
 
