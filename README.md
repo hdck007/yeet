@@ -75,52 +75,73 @@ curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
 **Prerequisites:** Go 1.21+, a C compiler (for SQLite)
 
 ```bash
-# macOS
-xcode-select --install   # one-time, if you haven't already
+curl -fsSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
+```
 
-# Clone & install
-git clone https://github.com/hdck007/yeet.git
-cd yeet
-make install
+That's it. The installer will:
+- Download the pre-built binary to `/usr/local/bin/yeet`
+- Install `jq` if missing
+- Set up the Claude Code proxy hook globally (`~/.claude/`)
 
-# Verify
+**Verify:**
+```bash
 yeet version
 yeet stats
 ```
 
-> 💡 If `yeet` isn't found after install, add `~/go/bin` to your PATH:
-> ```bash
-> # bash/zsh
-> echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
->
-> # fish
-> fish_add_path ~/go/bin
-> ```
+### Build from source
+
+```bash
+# Prerequisites: Go 1.21+, a C compiler (for SQLite)
+xcode-select --install   # macOS only, one-time
+
+git clone https://github.com/hdck007/yeet.git
+cd yeet
+make install
+```
 
 ---
 
 ## 🤖 Claude Code Setup
 
-Drop `CLAUDE.md` into your project and Claude will use `yeet` automatically — no reminders needed.
+Two layers work together: **blockers** prevent Claude from using native tools directly, **proxy hook** silently rewrites raw Bash commands to `yeet` equivalents.
+
+### Option A — Project-level (this repo only)
 
 ```bash
+bash scripts/install.sh --claude --plugin
+```
+
+### Option B — Global proxy hook (all projects)
+
+```bash
+# Blockers for this project
 bash scripts/install.sh --claude
+
+# Proxy hook for every Claude Code session globally
+bash scripts/install.sh --plugin --global
 ```
 
-**What this does:**
-- 📋 Copies `CLAUDE.md` → tells Claude to always prefer `yeet`
-- 🪝 Installs `PreToolUse` hooks → *blocks* the built-in Read/Grep/Glob/Write/Edit tools
-- 🚨 Installs `PostToolUse` hook → coaches Claude to fix `yeet` source if a command fails
+### What each piece does
 
-After setup, Claude will do this automatically:
+| Component | Flag | What it does |
+|-----------|------|--------------|
+| PreToolUse blockers | `--claude` | Blocks native Read/Glob/Grep/Write/Edit tools |
+| `yeet-proxy.sh` | `--plugin` | Rewrites `cat`/`grep` Bash calls to `yeet` before execution |
+
+After setup:
 
 ```
-Instead of Read tool   →   yeet read file.go
-Instead of Grep tool   →   yeet grep "pattern" .
-Instead of Glob tool   →   yeet glob "**/*.go"
-Instead of Write tool  →   cat <<EOF | yeet write file.go
-Instead of Edit tool   →   yeet edit file.go --old "..." --new "..."
+Native Read tool      →  BLOCKED
+Native Grep tool      →  BLOCKED
+Native Glob tool      →  BLOCKED
+Native Write tool     →  BLOCKED
+Native Edit tool      →  BLOCKED
+Bash: cat file.go     →  yeet read file.go    (rewritten silently)
+Bash: grep foo .      →  yeet grep foo .      (rewritten silently)
 ```
+
+`jq` is required for the proxy hook and auto-installed if missing.
 
 ---
 
@@ -137,13 +158,25 @@ bash scripts/install.sh --copilot
 
 ---
 
-## 🚀 Full Setup (Both)
+## 🚀 Advanced Setup (from source)
+
+For contributors or users who want everything — binary build, Claude Code blockers, proxy hook, and Copilot:
 
 ```bash
+git clone https://github.com/hdck007/yeet.git
+cd yeet
 bash scripts/install.sh
 ```
 
-Installs the binary, sets up Claude Code hooks, and sets up Copilot — all in one shot.
+Equivalent to `--build --claude --plugin --copilot`. Individual flags available:
+
+```bash
+bash scripts/install.sh --build             # binary only
+bash scripts/install.sh --claude            # Claude Code blockers only
+bash scripts/install.sh --plugin            # proxy hook (project-level)
+bash scripts/install.sh --plugin --global   # proxy hook (all projects)
+bash scripts/install.sh --copilot           # Copilot only
+```
 
 ---
 
@@ -173,11 +206,9 @@ old content
 new content
 EDIT
 
-# Writing files
-cat <<'WRITEOF' | yeet write path/to/file.go
-package main
-func main() {}
-WRITEOF
+# Writing files (base64-encode content — no shell escaping issues)
+yeet write path/to/file.go --b64 $(printf '%s' 'package main
+func main() {}' | base64)
 
 # Other
 yeet ls .                                            # directory tree
