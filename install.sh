@@ -107,22 +107,46 @@ if [ ! -f "$SETTINGS_FILE" ]; then
   jq -n --arg cmd "$HOOK_CMD" '{
     "hooks": {
       "PreToolUse": [
-        {"matcher": "Bash", "hooks": [{"type": "command", "command": $cmd}]}
+        {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
+        {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
+        {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
+        {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet write <file> --b64 <base64>` instead of the Write tool.'\'' >&2; exit 2"}]},
+        {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
+        {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
       ]
     }
   }' > "$SETTINGS_FILE"
-  ok "Created ~/.claude/settings.json"
+  ok "Created ~/.claude/settings.json with blocking hooks + proxy hook" 
 else
   TMP_SETTINGS="$(mktemp)"
   jq --arg cmd "$HOOK_CMD" '
     .hooks                //= {} |
     .hooks.PreToolUse     //= [] |
-    if (.hooks.PreToolUse | map(.hooks // [] | map(.command) | any(. == $cmd)) | any)
-    then .
-    else .hooks.PreToolUse += [{"matcher": "Bash", "hooks": [{"type": "command", "command": $cmd}]}]
-    end
+
+    # Ensure Bash proxy hook is present
+    ( if (.hooks.PreToolUse | map(.hooks // [] | map(.command) | any(. == $cmd)) | any)
+      then .
+      else .hooks.PreToolUse += [{"matcher": "Bash", "hooks": [{"type": "command", "command": $cmd}]}]
+      end ) |
+
+    # Ensure blocking hooks are present (idempotent by matcher)
+    ( . as $root |
+      [ "Read", "Glob", "Grep", "Write", "Edit" ] |
+      reduce .[] as $m (
+        $root;
+        if (.hooks.PreToolUse | map(.matcher) | any(. == $m)) then .
+        else
+          .hooks.PreToolUse = (
+            [ { "matcher": $m,
+                "hooks": [{ "type": "command",
+                            "command": ("echo '\''BLOCKED: use yeet instead of the " + $m + " tool.'\'' >&2; exit 2") }] }
+            ] + .hooks.PreToolUse
+          )
+        end
+      )
+    )
   ' "$SETTINGS_FILE" > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
-  ok "Updated ~/.claude/settings.json"
+  ok "Updated ~/.claude/settings.json"  
 fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
