@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "release/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install gcc (CGO)
+        run: sudo apt-get install -y gcc
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+  release:
+    needs: build
+    runs-on: macos-latest
+    if: startsWith(github.ref, 'refs/heads/release/')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=${GITHUB_REF_NAME#release/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check for duplicate tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION$"; then
+            echo "Tag $VERSION already exists — skipping."
+            exit 1
+          fi
+
+      - name: Build binaries
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          LDFLAGS="-ldflags -X github.com/hdck007/yeet/internal/cli.Version=$VERSION"
+          mkdir -p dist
+
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $LDFLAGS -o dist/yeet-darwin-amd64 ./cmd/yeet/
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build $LDFLAGS -o dist/yeet-darwin-arm64 ./cmd/yeet/
+          lipo -create -output dist/yeet-darwin-universal dist/yeet-darwin-amd64 dist/yeet-darwin-arm64
+
+      - name: Tag
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          files: dist/*
+          generate_release_notes: true
