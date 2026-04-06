@@ -249,6 +249,12 @@ internal/
 
 ---
 
+## 💡 Inspiration
+
+Yeet is inspired by [rtk](https://github.com/rtk-ai/rtk) — a Rust-based token-killer CLI proxy. RTK pioneered the idea of wrapping dev commands to compress LLM context. Yeet takes that concept and applies it to file operations and AI agent tooling specifically.
+
+---
+
 ## 📄 License
 
 MIT © [hdck007](https://github.com/hdck007)
