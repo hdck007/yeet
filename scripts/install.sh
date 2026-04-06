@@ -288,36 +288,51 @@ if $DO_PLUGIN; then
   HOOK_CMD="bash \"$PROXY_DST\""
 
   if [ ! -f "$SETTINGS_FILE" ]; then
-    # Create a minimal settings file with just the proxy hook
+    # Create a minimal settings file with blocking hooks + proxy hook
     jq -n --arg cmd "$HOOK_CMD" '{
       "hooks": {
         "PreToolUse": [
-          {
-            "matcher": "Bash",
-            "hooks": [{ "type": "command", "command": $cmd }]
-          }
+          {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
+          {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
+          {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
+          {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet write <file> --b64 <base64>` instead of the Write tool.'\'' >&2; exit 2"}]},
+          {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
+          {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
         ]
       }
     }' > "$SETTINGS_FILE"
     ok "Created settings → $SETTINGS_FILE"
   else
-    # Merge: append proxy hook to PreToolUse only if not already present
+    # Merge: add proxy hook + blocking hooks if not already present
     TMP=$(mktemp)
     jq --arg cmd "$HOOK_CMD" '
-      .hooks                          //= {} |
-      .hooks.PreToolUse               //= [] |
-      if (.hooks.PreToolUse
-            | map(.hooks // [] | map(.command) | any(. == $cmd))
-            | any) then
-        .   # already registered — no-op
-      else
-        .hooks.PreToolUse += [{
-          "matcher": "Bash",
-          "hooks": [{ "type": "command", "command": $cmd }]
-        }]
-      end
+      .hooks                //= {} |
+      .hooks.PreToolUse     //= [] |
+
+      # Ensure Bash proxy hook is present
+      ( if (.hooks.PreToolUse | map(.hooks // [] | map(.command) | any(. == $cmd)) | any)
+        then .
+        else .hooks.PreToolUse += [{"matcher": "Bash", "hooks": [{"type": "command", "command": $cmd}]}]
+        end ) |
+
+      # Ensure blocking hooks are present (idempotent by matcher)
+      ( . as $root |
+        [ "Read", "Glob", "Grep", "Write", "Edit" ] |
+        reduce .[] as $m (
+          $root;
+          if (.hooks.PreToolUse | map(.matcher) | any(. == $m)) then .
+          else
+            .hooks.PreToolUse = (
+              [ { "matcher": $m,
+                  "hooks": [{ "type": "command",
+                              "command": ("echo '\''BLOCKED: use yeet instead of the " + $m + " tool.'\'' >&2; exit 2") }] }
+              ] + .hooks.PreToolUse
+            )
+          end
+        )
+      )
     ' "$SETTINGS_FILE" > "$TMP" && mv "$TMP" "$SETTINGS_FILE"
-    ok "Merged proxy hook → $SETTINGS_FILE"
+    ok "Merged proxy hook + blocking hooks → $SETTINGS_FILE"
   fi
 
   echo ""
