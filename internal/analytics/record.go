@@ -13,6 +13,21 @@ type Usage struct {
 	DurationMs    int64
 }
 
+type Failure struct {
+	Subcmd   string
+	FullCmd  string
+	ExitCode int
+	Stderr   string
+}
+
+func (d *DB) RecordFailure(f Failure) error {
+	_, err := d.conn.Exec(`
+		INSERT INTO command_failures (subcmd, full_cmd, exit_code, stderr)
+		VALUES (?, ?, ?, ?)
+	`, f.Subcmd, f.FullCmd, f.ExitCode, f.Stderr)
+	return err
+}
+
 func (d *DB) RecordUsage(u Usage) error {
 	tx, err := d.conn.Begin()
 	if err != nil {

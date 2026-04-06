@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hdck007/yeet/internal/analytics"
 	"github.com/spf13/cobra"
@@ -58,5 +59,16 @@ func init() {
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+	cmd, err := rootCmd.ExecuteC()
+	if err != nil && !noAnalytics && db != nil {
+		_ = db.RecordFailure(analytics.Failure{
+			Subcmd:   cmd.Name(),
+			FullCmd:  strings.Join(os.Args, " "),
+			ExitCode: 1,
+			Stderr:   err.Error(),
+		})
+		_ = db.Close()
+		db = nil
+	}
+	return err
 }

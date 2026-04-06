@@ -35,3 +35,40 @@ func (d *DB) ResetStats() error {
 	_, err := d.conn.Exec("DELETE FROM command_usages; DELETE FROM command_parents;")
 	return err
 }
+
+type FailureRow struct {
+	ID        int
+	Subcmd    string
+	FullCmd   string
+	ExitCode  int
+	Stderr    string
+	CreatedAt string
+}
+
+func (d *DB) GetFailures(limit int) ([]FailureRow, error) {
+	rows, err := d.conn.Query(`
+		SELECT id, subcmd, full_cmd, exit_code, stderr, created_at
+		FROM command_failures
+		ORDER BY created_at DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var failures []FailureRow
+	for rows.Next() {
+		var f FailureRow
+		if err := rows.Scan(&f.ID, &f.Subcmd, &f.FullCmd, &f.ExitCode, &f.Stderr, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		failures = append(failures, f)
+	}
+	return failures, rows.Err()
+}
+
+func (d *DB) ClearFailures() error {
+	_, err := d.conn.Exec("DELETE FROM command_failures;")
+	return err
+}

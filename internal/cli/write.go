@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -12,15 +13,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var writeb64 string
+
 var writeCmd = &cobra.Command{
 	Use:   "write <file>",
-	Short: "Write stdin to file with compact confirmation",
-	Long:  "Reads from stdin, writes to file, returns a token-optimized confirmation instead of echoing the full content.",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWrite,
+	Short: "Write to file with compact confirmation",
+	Long: `Write content to a file and return a token-optimized confirmation.
+
+Content sources (pick one):
+  --b64 <base64>   Base64-encoded content — no shell escaping needed (preferred for AI agents)
+  stdin            Pipe content via stdin (cat <<'EOF' | yeet write <file>)`,
+	Args: cobra.ExactArgs(1),
+	RunE: runWrite,
 }
 
 func init() {
+	writeCmd.Flags().StringVar(&writeb64, "b64", "", "Base64-encoded file content (avoids shell quoting issues)")
 	rootCmd.AddCommand(writeCmd)
 }
 
@@ -28,9 +36,23 @@ func runWrite(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 	filename := args[0]
 
-	data, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return fmt.Errorf("read stdin: %w", err)
+	var data []byte
+	var err error
+
+	if writeb64 != "" {
+		data, err = base64.StdEncoding.DecodeString(writeb64)
+		if err != nil {
+			// Try URL-safe variant
+			data, err = base64.URLEncoding.DecodeString(writeb64)
+			if err != nil {
+				return fmt.Errorf("decode --b64: %w", err)
+			}
+		}
+	} else {
+		data, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
 	}
 
 	// Ensure parent directory exists

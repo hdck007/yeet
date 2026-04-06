@@ -88,6 +88,17 @@ func migrate(conn *sql.DB) error {
 
 	CREATE INDEX IF NOT EXISTS idx_usages_parent ON command_usages(command_parent_id);
 	CREATE INDEX IF NOT EXISTS idx_usages_created ON command_usages(created_at);
+
+	CREATE TABLE IF NOT EXISTS command_failures (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		subcmd     TEXT    NOT NULL,
+		full_cmd   TEXT    NOT NULL,
+		exit_code  INTEGER NOT NULL,
+		stderr     TEXT    NOT NULL DEFAULT '',
+		created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_failures_created ON command_failures(created_at);
 	`
 	_, err := conn.Exec(schema)
 	return err

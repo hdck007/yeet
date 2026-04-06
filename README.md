@@ -1,0 +1,254 @@
+# 🚀 yeet
+
+> **Token-optimized CLI wrapper for AI coding agents**
+> Stop burning context window on noisy command output. Yeet filters it down to what actually matters.
+
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://go.dev)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
+
+---
+
+## 🧒 ELI5 — Explain Like I'm 5
+
+Imagine you ask your friend *"what's in the fridge?"*
+
+😩 **Without yeet**, they read you every single label on every single item, expiry dates, nutrition facts, barcode numbers — the whole thing. By the time they're done you forgot what you even asked.
+
+😎 **With yeet**, they just say: *"milk, eggs, leftover pizza."* Done.
+
+That's it. **Yeet makes command output short and sweet so your AI doesn't waste its brain reading the noise.** Claude, Copilot, and other AI coding agents only have so much memory — yeet makes sure none of it gets wasted on junk.
+
+---
+
+## 🤔 Why?
+
+When AI agents like Claude Code run shell commands, they read every single character of the output — and every character costs tokens (= 💸 + 🧠 context).
+
+```
+$ ls -laR
+drwxr-xr-x  14 user  staff   448 Apr  5 12:34 .
+drwxr-xr-x   8 user  staff   256 Apr  5 12:30 ..
+-rw-r--r--   1 user  staff  1234 Apr  5 12:34 main.go
+... (200 more lines of noise)
+```
+
+vs.
+
+```
+$ yeet ls
+src/
+├── main.go
+├── utils.go
+└── config.go
+```
+
+**60–90% fewer tokens. Same information. Every. Single. Command.**
+
+---
+
+## ✨ Features
+
+| Command | What it does | Savings |
+|---|---|---|
+| `yeet ls` | 🌳 Clean directory tree (no permissions/dates noise) | ~80% |
+| `yeet read` | 📄 File content with line numbers, no bloat | ~30% |
+| `yeet smart` | 🧠 Just function/type signatures — skip the body | ~70% |
+| `yeet grep` | 🔍 Deduplicated matches, grouped by file | ~60% |
+| `yeet glob` | 📂 File paths only, no metadata | ~70% |
+| `yeet find` | 🔎 Pattern search, clean output | ~70% |
+| `yeet diff` | 🔀 Compact diff summary | ~50% |
+| `yeet edit` | ✏️ Surgical text replacement, tiny confirmation | ~95% |
+| `yeet write` | 💾 Write files, get a one-liner back | ~95% |
+| `yeet env` | 🔐 Env vars with secrets masked | ~60% |
+| `yeet stats` | 📊 Token savings dashboard | — |
+
+---
+
+## 📦 Install
+
+**Prerequisites:** Go 1.21+, a C compiler (for SQLite)
+
+```bash
+# macOS
+xcode-select --install   # one-time, if you haven't already
+
+# Clone & install
+git clone https://github.com/hdck007/yeet.git
+cd yeet
+make install
+
+# Verify
+yeet version
+yeet stats
+```
+
+> 💡 If `yeet` isn't found after install, add `~/go/bin` to your PATH:
+> ```bash
+> # bash/zsh
+> echo 'export PATH="$HOME/go/bin:$PATH"' >> ~/.zshrc
+>
+> # fish
+> fish_add_path ~/go/bin
+> ```
+
+---
+
+## 🤖 Claude Code Setup
+
+Drop `CLAUDE.md` into your project and Claude will use `yeet` automatically — no reminders needed.
+
+```bash
+bash scripts/install.sh --claude
+```
+
+**What this does:**
+- 📋 Copies `CLAUDE.md` → tells Claude to always prefer `yeet`
+- 🪝 Installs `PreToolUse` hooks → *blocks* the built-in Read/Grep/Glob/Write/Edit tools
+- 🚨 Installs `PostToolUse` hook → coaches Claude to fix `yeet` source if a command fails
+
+After setup, Claude will do this automatically:
+
+```
+Instead of Read tool   →   yeet read file.go
+Instead of Grep tool   →   yeet grep "pattern" .
+Instead of Glob tool   →   yeet glob "**/*.go"
+Instead of Write tool  →   cat <<EOF | yeet write file.go
+Instead of Edit tool   →   yeet edit file.go --old "..." --new "..."
+```
+
+---
+
+## 🐙 GitHub Copilot (VS Code) Setup
+
+```bash
+bash scripts/install.sh --copilot
+```
+
+**What this does:**
+- 📝 Creates `.github/copilot-instructions.md` → loads at every Copilot session
+- 🪝 Creates `.github/hooks/yeet-rewrite.sh` → intercepts raw commands in agent mode
+- ⚙️ Creates `.vscode/settings.json` → enables Copilot agent tool use
+
+---
+
+## 🚀 Full Setup (Both)
+
+```bash
+bash scripts/install.sh
+```
+
+Installs the binary, sets up Claude Code hooks, and sets up Copilot — all in one shot.
+
+---
+
+## 📖 Usage
+
+### Replacing built-in tools
+
+```bash
+# Reading files
+yeet read internal/cli/root.go                       # full file with line numbers
+yeet read internal/cli/root.go -l aggressive         # signatures only
+yeet smart internal/cli/root.go                      # quick summary
+
+# Searching
+yeet grep "func Run" .                               # grep across project
+yeet glob "**/*.go" .                                # find files by pattern
+yeet find "*.go" internal/                           # find by name
+
+# Editing
+yeet edit main.go --old "foo" --new "bar"            # replace first
+yeet edit main.go --old "foo" --new "bar" --all      # replace all
+
+# Multi-line edit (heredoc)
+yeet edit main.go << 'EDIT'
+old content
+|||
+new content
+EDIT
+
+# Writing files
+cat <<'WRITEOF' | yeet write path/to/file.go
+package main
+func main() {}
+WRITEOF
+
+# Other
+yeet ls .                                            # directory tree
+yeet diff file1.go file2.go                          # compact diff
+yeet env                                             # filtered env vars
+```
+
+### Analytics
+
+```bash
+yeet stats            # 📊 Token savings dashboard
+yeet stats --json     # Machine-readable output
+yeet clear            # Reset analytics DB
+yeet update           # Rebuild & reinstall from source
+yeet version          # Print version
+```
+
+---
+
+## 🏗️ How it works
+
+```
+AI Agent
+   │
+   ▼
+yeet <cmd>              ← thin wrapper, always exits with original exit code
+   │
+   ├─ runs underlying tool (cat, ls, grep, find, diff...)
+   ├─ filters & compresses the output
+   ├─ records raw vs. rendered char count in SQLite (~/.local/share/yeet/analytics.db)
+   └─ prints compact result
+```
+
+Every invocation records:
+- 📥 Raw character count (what you'd get without yeet)
+- 📤 Rendered character count (what the agent actually sees)
+- 💰 Tokens saved (estimated at ~4 chars/token)
+
+---
+
+## 🔢 Real Numbers
+
+Run `bash demo.sh` from the repo root to see live savings on this codebase:
+
+| Command | Raw | Yeet | Saved |
+|---|---|---|---|
+| `ls` | ~8,000 chars | ~400 chars | **95%** |
+| `grep` | ~12,000 chars | ~1,800 chars | **85%** |
+| `read` | ~3,200 chars | ~2,800 chars | **13%** |
+| `read -l agg` | ~3,200 chars | ~200 chars | **94%** |
+| `glob` | ~600 chars | ~480 chars | **20%** |
+| `diff` | ~2,400 chars | ~1,600 chars | **33%** |
+
+---
+
+## 🛠️ Development
+
+```bash
+make build    # compile
+make install  # build + install to ~/go/bin
+make test     # run tests
+```
+
+**Project layout:**
+
+```
+internal/
+├── cli/        # one file per yeet subcommand
+├── filter/     # output compression logic
+├── analytics/  # SQLite recording
+├── token/      # char → token estimator
+├── exec/       # subprocess runner
+└── ignore/     # .gitignore-aware path filtering
+```
+
+---
+
+## 📄 License
+
+MIT © [hdck007](https://github.com/hdck007)

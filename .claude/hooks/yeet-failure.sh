@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# PostToolUse hook: when a yeet command fails, remind Claude to fix the source.
+# PostToolUse hook: when a yeet command fails, coach Claude to fix the source.
 #
-# Reads the tool result JSON from stdin, checks if:
-#   1. It was a Bash tool call
-#   2. The command started with "yeet" or "./yeet"
-#   3. The exit code was non-zero
-# If so, emits a message prompting Claude to update internal/cli/ with a fallback.
+# Failure recording happens inside the yeet binary itself (Execute() in root.go).
+# This hook only handles the coaching output to Claude.
 
 if ! command -v jq &>/dev/null; then
   exit 0
@@ -30,7 +27,6 @@ if [ "$EXIT_CODE" = "0" ] || [ -z "$EXIT_CODE" ]; then
   exit 0
 fi
 
-# Extract the subcommand (first argument after yeet)
 SUBCMD=$(echo "$CMD" | sed 's|^\./yeet ||; s|^yeet ||' | awk '{print $1}')
 
 echo "[yeet-failure] The command failed: $CMD (exit $EXIT_CODE)"
@@ -45,3 +41,4 @@ echo "3. Run \`make build && make test\` to verify the fix"
 echo "4. Re-run the original command to confirm it works"
 echo ""
 echo "Do not skip this — every yeet command must degrade gracefully."
+echo "(Run \`yeet failures\` to review all recorded failures.)"

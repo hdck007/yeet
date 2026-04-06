@@ -14,7 +14,7 @@
 | `Edit` tool | `yeet edit <file> --old "..." --new "..."` |
 | `Glob` tool | `yeet glob "<pattern>" [path]` |
 | `Grep` tool | `yeet grep "<pattern>" [path]` |
-| `Write` tool | `cat <<'EOF' \| yeet write <file>` |
+| `Write` tool | `yeet write <file> --b64 <base64-encoded-content>` |
 | `ls` via Bash | `yeet ls [path]` |
 | `find` via Bash | `yeet find "<pattern>" [path]` |
 | `diff` via Bash | `yeet diff <file1> <file2>` |
@@ -26,11 +26,11 @@
 - **ALWAYS** use `yeet edit` instead of the `Edit` tool
 - **ALWAYS** use `yeet glob` instead of the `Glob` tool
 - **ALWAYS** use `yeet grep` instead of the `Grep` tool
-- **ALWAYS** pipe content to `yeet write <file>` instead of using the `Write` tool
+- **ALWAYS** use `yeet write <file> --b64 <base64>` instead of the `Write` tool — base64 content has no shell escaping issues
 - **ALWAYS** use `yeet ls` instead of `ls` in Bash
 - **ALWAYS** use `yeet find` instead of `find` in Bash
 - **ALWAYS** use `yeet diff` instead of `diff` in Bash
-- **NEVER** use `cat <<'EOF' > file` to write files — pipe to `yeet write` instead
+- **NEVER** use heredocs, pipes, or Python to write files — use `--b64` instead
 - **IF** a `yeet` command fails: diagnose and fix `internal/cli/<cmd>.go`, then re-run — do NOT fall back to the raw tool
 - Use `yeet smart <file>` for quick file overviews before diving deeper
 - Use `yeet read <file> -l aggressive` to see only function/type signatures
@@ -59,13 +59,17 @@ EDIT
 
 ### Write pattern
 
-```bash
-cat <<'EOF' | yeet write path/to/file.go
-package main
+Base64-encode the content and pass via `--b64`. No heredocs, no pipes, no shell escaping issues — works in every shell including fish.
 
-func main() {}
-EOF
+```bash
+# Encode content to base64, then write
+yeet write path/to/file.go --b64 $(printf '%s' 'package main\n\nfunc main() {}' | base64)
+
+# Or if you have the base64 string already (Claude generates it directly):
+yeet write path/to/file.go --b64 cGFja2FnZSBtYWluCgpmdW5jIG1haW4oKSB7fQo=
 ```
+
+> **For AI agents:** Generate the file content, base64-encode it mentally or via a subshell, pass as `--b64`. The base64 alphabet (A–Z, a–z, 0–9, +, /, =) contains zero shell-special characters.
 
 ### Other commands
 
