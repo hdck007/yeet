@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "tool": "bash",
+      "command": "bash \"${WORKSPACE_FOLDER}/.github/hooks/yeet-rewrite.sh\""
+    },
+    {
+      "event": "PreToolUse",
+      "tool": "Bash",
+      "command": "bash \"${WORKSPACE_FOLDER}/.github/hooks/yeet-rewrite.sh\""
+    }
+  ]
+}
