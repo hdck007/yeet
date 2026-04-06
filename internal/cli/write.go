@@ -20,9 +20,10 @@ var writeCmd = &cobra.Command{
 	Short: "Write to file with compact confirmation",
 	Long: `Write content to a file and return a token-optimized confirmation.
 
-Content sources (pick one):
-  --b64 <base64>   Base64-encoded content — no shell escaping needed (preferred for AI agents)
-  stdin            Pipe content via stdin (cat <<'EOF' | yeet write <file>)`,
+Content source:
+  stdin   cat > /tmp/f << 'EOF' ... EOF && yeet write <file> < /tmp/f
+
+  --b64   Base64-encoded content (legacy, not recommended)`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWrite,
 }
