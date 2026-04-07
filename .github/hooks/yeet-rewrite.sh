@@ -58,10 +58,14 @@ elif echo "$CMD" | grep -qE '^ls([[:space:]]|$)'; then
 elif echo "$CMD" | grep -qE '^find[[:space:]]'; then
   # Best-effort: extract -name pattern and base path
   BASE=$(echo "$CMD" | awk '{print $2}')
-  PATTERN=$(echo "$CMD" | grep -oP '(?<=-name\s)[^\s]+' || true)
+  # Portable: sed instead of grep -P (macOS/BSD-compatible)
+  PATTERN=$(echo "$CMD" | sed -n "s/.*-name[[:space:]]*'\([^']*\)'.*/\1/p" | head -1)
+  if [ -z "$PATTERN" ]; then
+    PATTERN=$(echo "$CMD" | sed -n 's/.*-name[[:space:]]\+\([^[:space:]]*\)/\1/p' | tr -d "'\"" | head -1)
+  fi
   if [ -n "$PATTERN" ]; then
-    # Convert shell glob (*.go) to doublestar (**/*.go)
-    GLOB_PATTERN=$(echo "$PATTERN" | sed "s/^\*\\./**\/./" | tr -d "'\"")
+    # Convert shell glob (*.ext) to doublestar (**/*.ext)
+    GLOB_PATTERN=$(echo "$PATTERN" | sed 's/^\*\./**\/*./') 
     NEW_CMD="yeet glob \"$GLOB_PATTERN\" $BASE"
   fi
 

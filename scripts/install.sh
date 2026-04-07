@@ -199,8 +199,8 @@ if $DO_COPILOT; then
   HOOKS_DIR="$GITHUB_DIR/hooks"
   mkdir -p "$HOOKS_DIR"
 
-  # copilot-instructions.md
-  cp "$YEET_REPO/.github/copilot-instructions.md" "$GITHUB_DIR/copilot-instructions.md"
+  # copilot-instructions.md (source of truth: hooks/copilot/yeet-awareness.md)
+  cp "$YEET_REPO/hooks/copilot/yeet-awareness.md" "$GITHUB_DIR/copilot-instructions.md"
   ok "Copilot instructions → $GITHUB_DIR/copilot-instructions.md"
 
   # Hook script + config
