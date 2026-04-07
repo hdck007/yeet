@@ -78,20 +78,21 @@ func runDeps(cmd *cobra.Command, args []string) error {
 	}
 
 	rendered := buf.String()
-	fmt.Print(rendered)
-
-	if !noAnalytics && db != nil {
-		// Raw = what you'd get reading all dep files individually with cat
-		rawSize := 0
-		for _, f := range []string{dir + "/go.mod", dir + "/package.json", dir + "/requirements.txt", dir + "/Cargo.toml"} {
-			if d, err2 := os.ReadFile(f); err2 == nil {
-				rawSize += len(d)
-			}
+	// Raw = what you'd get reading all dep files individually with cat
+	var rawBuf strings.Builder
+	for _, f := range []string{dir + "/go.mod", dir + "/package.json", dir + "/requirements.txt", dir + "/Cargo.toml"} {
+		if d, err2 := os.ReadFile(f); err2 == nil {
+			rawBuf.Write(d)
 		}
+	}
+	rawOutput := rawBuf.String()
+	improved := printBetter(rawOutput, rendered)
+
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "deps",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      rawSize,
+			CharsRaw:      len(rawOutput),
 			CharsRendered: len(rendered),
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),

@@ -52,9 +52,9 @@ func runLog(cmd *cobra.Command, args []string) error {
 	}
 
 	rendered := analyzeLogContent(content)
-	fmt.Print(rendered)
+	improved := printBetter(content, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		name := "stdin"
 		if len(args) > 0 {
 			name = args[0]

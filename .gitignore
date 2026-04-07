@@ -16,3 +16,4 @@ vendor/
 # Claude Code local settings (personal, never commit)
 .claude/settings.local.json
 .claude/settings.json
+scripts/test-yarn.lock

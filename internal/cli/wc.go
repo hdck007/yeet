@@ -14,10 +14,10 @@ import (
 )
 
 var wcCmd = &cobra.Command{
-	Use:   "wc [flags] [file...]",
-	Short: "Compact word/line/byte count",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runWC,
+	Use:                "wc [flags] [file...]",
+	Short:              "Compact word/line/byte count",
+	DisableFlagParsing: true,
+	RunE:               runWC,
 }
 
 func init() {
@@ -38,9 +38,9 @@ func runWC(cmd *cobra.Command, args []string) error {
 	raw := result.Stdout + result.Stderr
 
 	rendered := filterWCOutput(raw, args)
-	fmt.Print(rendered)
+	improved := printBetter(raw, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "wc",
 			ArgsSummary:   strings.Join(args, " "),

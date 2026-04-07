@@ -119,10 +119,10 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	if rendered == "" {
 		rendered = "(no matching variables)\n"
 	}
-	fmt.Print(rendered)
+	raw := strings.Join(os.Environ(), "\n")
+	improved := printBetter(raw, rendered)
 
-	if !noAnalytics && db != nil {
-		raw := strings.Join(os.Environ(), "\n")
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "env",
 			ArgsSummary:   strings.Join(args, " "),

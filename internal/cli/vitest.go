@@ -62,9 +62,9 @@ func runVitest(cmd *cobra.Command, args []string) error {
 
 	raw := result.Stdout
 	rendered := filterVitestOutput(raw, result.Stderr, result.ExitCode)
-	fmt.Print(rendered)
+	improved := printBetter(raw, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "vitest",
 			ArgsSummary:   strings.Join(args, " "),
