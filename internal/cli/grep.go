@@ -5,73 +5,42 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hdck007/yeet/internal/analytics"
 	yeetexec "github.com/hdck007/yeet/internal/exec"
-	"github.com/hdck007/yeet/internal/ignore"
 	"github.com/spf13/cobra"
 )
 
-const grepMaxPerFile = 25   // matches per file (mirrors rtk default)
-const grepMaxResults = 200  // global cap across all files (mirrors rtk default)
-const grepLineMaxLen = 80   // chars per line before truncation
+var (
+	grepMaxPerFile  = 25
+	grepMaxResults  = 200
+	grepLineMaxLen  = 80
+	grepContextOnly bool
+	grepFileType    string
+	grepVerbose     int
+)
 
 var grepCmd = &cobra.Command{
-	Use:   "grep <pattern> [path]",
+	Use:   "grep <pattern> [path] [extra_args...]",
 	Short: "Compact grouped search results",
-	Args:  cobra.RangeArgs(1, 2),
+	Args:  cobra.MinimumNArgs(1),
 	RunE:  runGrep,
 }
 
 func init() {
+	grepCmd.Flags().BoolVar(&grepContextOnly, "context", false, "Extract context only")
+	grepCmd.Flags().StringVar(&grepFileType, "type", "", "File type (rg only)")
+	grepCmd.Flags().IntVarP(&grepVerbose, "verbose", "v", 0, "Verbosity level")
+	grepCmd.Flags().IntVar(&grepMaxResults, "max-results", 200, "Max overall results shown")
+	grepCmd.Flags().IntVar(&grepLineMaxLen, "max-line-len", 80, "Max chars per line")
+	grepCmd.Flags().IntVar(&grepMaxPerFile, "max-per-file", 25, "Max matches shown per file")
 	rootCmd.AddCommand(grepCmd)
-}
-
-func runGrep(cmd *cobra.Command, args []string) error {
-	start := time.Now()
-
-	pattern := args[0]
-	searchPath := "."
-	if len(args) > 1 {
-		searchPath = args[1]
-	}
-
-	var rawOutput, rendered string
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if yeetexec.Available("grep") {
-		result := yeetexec.Run(ctx, "grep", "-rn", pattern, searchPath)
-		rawOutput = result.Stdout
-		rendered = formatGrepCompact(rawOutput)
-	} else {
-		rawOutput, rendered = nativeGrep(pattern, searchPath)
-	}
-
-	improved := printBetter(rawOutput, rendered)
-
-	if improved && !noAnalytics && db != nil {
-		if err := db.RecordUsage(analytics.Usage{
-			Command:       "grep",
-			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      len(rawOutput),
-			CharsRendered: len(rendered),
-			ExitCode:      0,
-			DurationMs:    time.Since(start).Milliseconds(),
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "yeet: analytics error: %v\n", err)
-		}
-	}
-
-	return nil
 }
 
 type grepMatch struct {
@@ -79,189 +48,228 @@ type grepMatch struct {
 	content string
 }
 
-// abbreviatePath shortens a long path to /.../parent/file.
-func abbreviatePath(path string) string {
-	parts := strings.Split(path, string(os.PathSeparator))
-	if len(parts) <= 4 {
-		return path
-	}
-	return "/.../" + strings.Join(parts[len(parts)-3:], "/")
-}
+func runGrep(cmd *cobra.Command, args []string) error {
+	start := time.Now()
 
-// truncateLine trims a line to maxLen, appending "…" if cut.
-func truncateLine(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) <= grepLineMaxLen {
-		return s
-	}
-	return s[:grepLineMaxLen] + "…"
-}
+	pattern := args[0]
+	searchPath := "."
+	var extraArgs []string
 
-// formatGrepCompact converts grep -rn output to rtk-style grouped format:
-//
-//	N matches in MF:
-//
-//	[file] /.../path (K):
-//	   linenum: content
-func formatGrepCompact(raw string) string {
-	if strings.TrimSpace(raw) == "" {
-		return "(no matches)\n"
+	if len(args) > 1 {
+		searchPath = args[1]
+	}
+	if len(args) > 2 {
+		extraArgs = args[2:]
 	}
 
-	// file → ordered list of matches
-	fileOrder := []string{}
-	fileMatches := map[string][]grepMatch{}
+	if grepVerbose > 0 {
+		fmt.Fprintf(os.Stderr, "grep: '%s' in %s\n", pattern, searchPath)
+	}
 
-	scanner := bufio.NewScanner(strings.NewReader(raw))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Fix: convert BRE alternation \| → | for rg (which uses PCRE-style regex)
+	rgPattern := strings.ReplaceAll(pattern, `\|`, "|")
+
+	var result yeetexec.Result
+
+	if yeetexec.Available("rg") {
+		rgArgs := []string{"-n", "--no-heading", "--color=never"}
+		if grepFileType != "" {
+			rgArgs = append(rgArgs, "--type", grepFileType)
+		}
+
+		for _, arg := range extraArgs {
+			// Fix: skip grep-ism -r flag (rg is recursive by default)
+			if arg == "-r" || arg == "--recursive" {
+				continue
+			}
+			rgArgs = append(rgArgs, arg)
+		}
+		rgArgs = append(rgArgs, rgPattern, searchPath)
+
+		result = yeetexec.Run(ctx, "rg", rgArgs...)
+	} else {
+		grepArgs := []string{"-rn", "--color=never"}
+		grepArgs = append(grepArgs, extraArgs...)
+		grepArgs = append(grepArgs, pattern, searchPath)
+		result = yeetexec.Run(ctx, "grep", grepArgs...)
+	}
+
+	rawOutput := result.Stdout
+
+	if strings.TrimSpace(rawOutput) == "" {
+		if result.ExitCode == 2 && strings.TrimSpace(result.Stderr) != "" {
+			fmt.Fprintln(os.Stderr, strings.TrimSpace(result.Stderr))
+		}
+		msg := fmt.Sprintf("0 matches for '%s'\n", pattern)
+		fmt.Print(msg)
+		trackAnalytics(start, args, rawOutput, msg, result.ExitCode)
+		return nil
+	}
+
+	var contextRe *regexp.Regexp
+	if grepContextOnly {
+		// Compile context regex once
+		reStr := fmt.Sprintf(`(?i).{0,20}%s.*`, regexp.QuoteMeta(pattern))
+		contextRe, _ = regexp.Compile(reStr)
+	}
+
+	fileMatches := make(map[string][]grepMatch)
+	total := 0
+
+	scanner := bufio.NewScanner(strings.NewReader(rawOutput))
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
+
+		var file, lineNum, content string
+		if len(parts) == 3 {
+			file, lineNum, content = parts[0], parts[1], parts[2]
+		} else if len(parts) == 2 {
+			file, lineNum, content = searchPath, parts[0], parts[1]
+		} else {
 			continue
 		}
-		file, lineNum, content := parts[0], parts[1], parts[2]
-		if _, seen := fileMatches[file]; !seen {
-			fileOrder = append(fileOrder, file)
-		}
-		fileMatches[file] = append(fileMatches[file], grepMatch{lineNum, content})
+
+		total++
+		cleaned := cleanLine(content, grepLineMaxLen, contextRe, pattern)
+		fileMatches[file] = append(fileMatches[file], grepMatch{lineNum, cleaned})
 	}
 
+	var fileOrder []string
+	for f := range fileMatches {
+		fileOrder = append(fileOrder, f)
+	}
 	sort.Strings(fileOrder)
 
-	totalMatches := 0
-	for _, m := range fileMatches {
-		totalMatches += len(m)
-	}
-
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%d matches in %dF:\n", totalMatches, len(fileOrder))
+	fmt.Fprintf(&buf, "%d matches in %dF:\n\n", total, len(fileOrder))
 
 	shown := 0
 	for _, file := range fileOrder {
 		if shown >= grepMaxResults {
 			break
 		}
+
 		matches := fileMatches[file]
-		fmt.Fprintf(&buf, "\n[file] %s (%d):\n", abbreviatePath(file), len(matches))
+		fileDisplay := compactPath(file)
+		fmt.Fprintf(&buf, "[file] %s (%d):\n", fileDisplay, len(matches))
+
 		perFile := matches
-		overflow := 0
 		if len(matches) > grepMaxPerFile {
 			perFile = matches[:grepMaxPerFile]
-			overflow = len(matches) - grepMaxPerFile
 		}
+
 		for _, m := range perFile {
 			if shown >= grepMaxResults {
-				overflow += len(perFile) - (len(perFile) - overflow) // remaining
 				break
 			}
-			fmt.Fprintf(&buf, "  %s: %s\n", m.lineNum, truncateLine(m.content))
+			fmt.Fprintf(&buf, "  %4s: %s\n", m.lineNum, m.content)
 			shown++
 		}
-		if overflow > 0 {
-			fmt.Fprintf(&buf, "  +%d more\n", overflow)
+
+		if len(matches) > grepMaxPerFile {
+			fmt.Fprintf(&buf, "  +%d\n", len(matches)-grepMaxPerFile)
 		}
-	}
-	if shown >= grepMaxResults && totalMatches > shown {
-		fmt.Fprintf(&buf, "\n[truncated: %d total matches, showing first %d]\n", totalMatches, shown)
+		buf.WriteString("\n")
 	}
 
-	return buf.String()
+	if total > shown {
+		fmt.Fprintf(&buf, "... +%d\n", total-shown)
+	}
+
+	rendered := buf.String()
+	fmt.Print(rendered)
+
+	trackAnalytics(start, args, rawOutput, rendered, result.ExitCode)
+	return nil
 }
 
-func nativeGrep(pattern string, searchPath string) (string, string) {
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return "", fmt.Sprintf("invalid pattern: %v\n", err)
+func cleanLine(line string, maxLen int, contextRe *regexp.Regexp, pattern string) string {
+	trimmed := strings.TrimSpace(line)
+
+	if contextRe != nil {
+		if loc := contextRe.FindStringIndex(trimmed); loc != nil {
+			matched := trimmed[loc[0]:loc[1]]
+			if utf8.RuneCountInString(matched) <= maxLen {
+				return matched
+			}
+		}
 	}
 
-	absPath, _ := filepath.Abs(searchPath)
-	matcher := ignore.NewMatcher(absPath)
+	runes := []rune(trimmed)
+	charLen := len(runes)
 
-	fileOrder := []string{}
-	fileMatches := map[string][]grepMatch{}
-	var rawBuf bytes.Buffer
+	if charLen <= maxLen {
+		return trimmed
+	}
 
-	filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && path != absPath && matcher.ShouldIgnore(d.Name(), true) {
-			return fs.SkipDir
-		}
-		if d.IsDir() || matcher.ShouldIgnore(d.Name(), false) {
-			return nil
-		}
+	lower := strings.ToLower(trimmed)
+	patternLower := strings.ToLower(pattern)
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
+	if idx := strings.Index(lower, patternLower); idx != -1 {
+		// Calculate character position safely for multibyte strings
+		charPos := utf8.RuneCountInString(lower[:idx])
+
+		start := charPos - (maxLen / 3)
+		if start < 0 {
+			start = 0
 		}
 
-		// Skip binary files
-		checkLen := 512
-		if len(data) < checkLen {
-			checkLen = len(data)
-		}
-		for _, b := range data[:checkLen] {
-			if b == 0 {
-				return nil
+		end := start + maxLen
+		if end > charLen {
+			end = charLen
+			start = end - maxLen
+			if start < 0 {
+				start = 0
 			}
 		}
 
-		rel, _ := filepath.Rel(absPath, path)
-		lines := strings.Split(string(data), "\n")
-		for i, line := range lines {
-			if re.MatchString(line) {
-				rawBuf.WriteString(fmt.Sprintf("%s:%d:%s\n", rel, i+1, line))
-				if _, seen := fileMatches[rel]; !seen {
-					fileOrder = append(fileOrder, rel)
-				}
-				fileMatches[rel] = append(fileMatches[rel], grepMatch{fmt.Sprintf("%d", i+1), line})
-			}
+		slice := string(runes[start:end])
+		if start > 0 && end < charLen {
+			return fmt.Sprintf("...%s...", slice)
+		} else if start > 0 {
+			return fmt.Sprintf("...%s", slice)
 		}
-		return nil
-	})
-
-	if len(fileOrder) == 0 {
-		return rawBuf.String(), "(no matches)\n"
+		return fmt.Sprintf("%s...", slice)
 	}
 
-	totalMatches := 0
-	for _, m := range fileMatches {
-		totalMatches += len(m)
+	// Fallback if pattern wasn't found (e.g., regex differences)
+	if maxLen > 3 {
+		return fmt.Sprintf("%s...", string(runes[:maxLen-3]))
+	}
+	return string(runes[:maxLen])
+}
+
+func compactPath(path string) string {
+	if len(path) <= 50 {
+		return path
 	}
 
-	sort.Strings(fileOrder)
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "%d matches in %dF:\n", totalMatches, len(fileOrder))
-
-	shown := 0
-	for _, file := range fileOrder {
-		if shown >= grepMaxResults {
-			break
-		}
-		matches := fileMatches[file]
-		fmt.Fprintf(&buf, "\n[file] %s (%d):\n", abbreviatePath(file), len(matches))
-		perFile := matches
-		overflow := 0
-		if len(matches) > grepMaxPerFile {
-			perFile = matches[:grepMaxPerFile]
-			overflow = len(matches) - grepMaxPerFile
-		}
-		for _, m := range perFile {
-			if shown >= grepMaxResults {
-				break
-			}
-			fmt.Fprintf(&buf, "  %s: %s\n", m.lineNum, truncateLine(m.content))
-			shown++
-		}
-		if overflow > 0 {
-			fmt.Fprintf(&buf, "  +%d more\n", overflow)
-		}
-	}
-	if shown >= grepMaxResults && totalMatches > shown {
-		fmt.Fprintf(&buf, "\n[truncated: %d total matches, showing first %d]\n", totalMatches, shown)
+	parts := strings.Split(path, "/")
+	if len(parts) <= 3 {
+		return path
 	}
 
-	return rawBuf.String(), buf.String()
+	return fmt.Sprintf("%s/.../%s/%s", parts[0], parts[len(parts)-2], parts[len(parts)-1])
+}
+
+func trackAnalytics(start time.Time, args []string, rawOutput, rendered string, exitCode int) {
+	// Assuming these variables are defined globally elsewhere in your package,
+	// just like the original Go snippet you provided.
+	improved := len(rendered) < len(rawOutput)
+	if improved && !noAnalytics && db != nil {
+		if err := db.RecordUsage(analytics.Usage{
+			Command:       "grep",
+			ArgsSummary:   strings.Join(args, " "),
+			CharsRaw:      len(rawOutput),
+			CharsRendered: len(rendered),
+			ExitCode:      exitCode,
+			DurationMs:    time.Since(start).Milliseconds(),
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "yeet: analytics error: %v\n", err)
+		}
+	}
 }
