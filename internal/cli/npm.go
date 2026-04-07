@@ -60,9 +60,9 @@ func runNPM(cmd *cobra.Command, args []string) error {
 	raw := result.Stdout + result.Stderr
 
 	rendered := filterNPMOutput(raw, result.ExitCode)
-	fmt.Print(rendered)
+	improved := printBetter(raw, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "npm",
 			ArgsSummary:   strings.Join(args, " "),

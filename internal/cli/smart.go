@@ -46,9 +46,9 @@ func runSmartImpl(args []string) error {
 
 	content := string(data)
 	rendered := filter.FileSummary(content, filename, info.Size())
-	fmt.Print(rendered)
+	improved := printBetter(content, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "smart",
 			ArgsSummary:   filename,

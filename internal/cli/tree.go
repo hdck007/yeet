@@ -62,9 +62,9 @@ func runTree(cmd *cobra.Command, args []string) error {
 		rendered = raw
 	}
 
-	fmt.Print(rendered)
+	improved := printBetter(raw, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "tree",
 			ArgsSummary:   strings.Join(args, " "),

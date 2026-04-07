@@ -46,19 +46,19 @@ func runDiffImpl(args []string) error {
 
 	if rawOutput == "" && result.ExitCode == 0 {
 		rendered := "files are identical\n"
-		fmt.Print(rendered)
-		recordDiffAnalytics(args, rawOutput, rendered, start)
+		improved := printBetter(rawOutput, rendered)
+		recordDiffAnalytics(args, rawOutput, rendered, improved, start)
 		return nil
 	}
 
 	rendered := filter.CompactDiff(rawOutput)
-	fmt.Print(rendered)
-	recordDiffAnalytics(args, rawOutput, rendered, start)
+	improved := printBetter(rawOutput, rendered)
+	recordDiffAnalytics(args, rawOutput, rendered, improved, start)
 	return nil
 }
 
-func recordDiffAnalytics(args []string, raw, rendered string, start time.Time) {
-	if noAnalytics || db == nil {
+func recordDiffAnalytics(args []string, raw, rendered string, improved bool, start time.Time) {
+	if !improved || noAnalytics || db == nil {
 		return
 	}
 	if err := db.RecordUsage(analytics.Usage{

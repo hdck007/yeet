@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -62,13 +63,15 @@ func runFindImpl(args []string) error {
 			return nil
 		}
 		// Never skip the root directory itself
-		if d.IsDir() && path != absPath && matcher.ShouldIgnore(d.Name(), true) {
+		if d.IsDir() && path != absPath &&
+			(strings.HasPrefix(d.Name(), ".") || matcher.ShouldIgnore(d.Name(), true)) {
 			return fs.SkipDir
 		}
 		if d.IsDir() {
 			return nil
 		}
-		if matcher.ShouldIgnore(d.Name(), false) {
+		// Skip hidden files (starting with ".") — mirrors rtk/ignore crate default
+		if strings.HasPrefix(d.Name(), ".") || matcher.ShouldIgnore(d.Name(), false) {
 			return nil
 		}
 
@@ -83,22 +86,66 @@ func runFindImpl(args []string) error {
 		return err
 	}
 
-	var buf bytes.Buffer
+	// Group files by their parent directory (rtk format: "NF MD:\n\ndir/ f1 f2 ...")
+	dirOrder := []string{}
+	dirFiles := map[string][]string{}
+	dirSet := map[string]bool{}
+
 	for _, r := range results {
-		fmt.Fprintln(&buf, r)
+		dir := filepath.Dir(r)
+		if !dirSet[dir] {
+			dirSet[dir] = true
+			dirOrder = append(dirOrder, dir)
+		}
+		dirFiles[dir] = append(dirFiles[dir], filepath.Base(r))
 	}
-	fmt.Fprintf(&buf, "(found %d files)\n", len(results))
+
+	// Sort dirs: root "." first, then alphabetically
+	sort.Slice(dirOrder, func(i, j int) bool {
+		if dirOrder[i] == "." {
+			return true
+		}
+		if dirOrder[j] == "." {
+			return false
+		}
+		return dirOrder[i] < dirOrder[j]
+	})
+
+	// Cap at 50 total files shown (mirrors rtk default max_results=50)
+	const findMaxResults = 50
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%dF %dD:\n\n", len(results), len(dirOrder))
+
+	shown := 0
+	for _, dir := range dirOrder {
+		if shown >= findMaxResults {
+			break
+		}
+		label := "./"
+		if dir != "." {
+			label = dir + "/"
+		}
+		files := dirFiles[dir]
+		if shown+len(files) > findMaxResults {
+			files = files[:findMaxResults-shown]
+		}
+		fmt.Fprintf(&buf, "%s %s\n", label, strings.Join(files, " "))
+		shown += len(files)
+	}
+	if len(results) > shown {
+		fmt.Fprintf(&buf, "+%d more\n", len(results)-shown)
+	}
 
 	rendered := buf.String()
-	fmt.Print(rendered)
+	// Estimate raw: a typical `find` outputs full paths with metadata (~2x)
+	rawOutput := strings.Repeat("x", len(rendered)*2)
+	improved := printBetter(rawOutput, rendered)
 
-	if !noAnalytics && db != nil {
-		// Estimate raw: a typical `find` outputs full paths with metadata
-		rawEstimate := len(rendered) * 2
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "find",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      rawEstimate,
+			CharsRaw:      len(rawOutput),
 			CharsRendered: len(rendered),
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),

@@ -19,9 +19,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const grepMaxPerFile = 25   // matches per file (mirrors rtk default)
+const grepMaxResults = 200  // global cap across all files (mirrors rtk default)
+const grepLineMaxLen = 80   // chars per line before truncation
+
 var grepCmd = &cobra.Command{
 	Use:   "grep <pattern> [path]",
-	Short: "Compact search results — file:line only",
+	Short: "Compact grouped search results",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE:  runGrep,
 }
@@ -52,9 +56,9 @@ func runGrep(cmd *cobra.Command, args []string) error {
 		rawOutput, rendered = nativeGrep(pattern, searchPath)
 	}
 
-	fmt.Print(rendered)
+	improved := printBetter(rawOutput, rendered)
 
-	if !noAnalytics && db != nil {
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "grep",
 			ArgsSummary:   strings.Join(args, " "),
@@ -70,14 +74,43 @@ func runGrep(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+type grepMatch struct {
+	lineNum string
+	content string
+}
+
+// abbreviatePath shortens a long path to /.../parent/file.
+func abbreviatePath(path string) string {
+	parts := strings.Split(path, string(os.PathSeparator))
+	if len(parts) <= 4 {
+		return path
+	}
+	return "/.../" + strings.Join(parts[len(parts)-3:], "/")
+}
+
+// truncateLine trims a line to maxLen, appending "…" if cut.
+func truncateLine(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= grepLineMaxLen {
+		return s
+	}
+	return s[:grepLineMaxLen] + "…"
+}
+
+// formatGrepCompact converts grep -rn output to rtk-style grouped format:
+//
+//	N matches in MF:
+//
+//	[file] /.../path (K):
+//	   linenum: content
 func formatGrepCompact(raw string) string {
-	if raw == "" {
+	if strings.TrimSpace(raw) == "" {
 		return "(no matches)\n"
 	}
 
-	var buf bytes.Buffer
-	totalMatches := 0
-	fileSet := map[string]bool{}
+	// file → ordered list of matches
+	fileOrder := []string{}
+	fileMatches := map[string][]grepMatch{}
 
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	for scanner.Scan() {
@@ -86,14 +119,52 @@ func formatGrepCompact(raw string) string {
 		if len(parts) < 3 {
 			continue
 		}
-		file := parts[0]
-		lineNum := parts[1]
-		fileSet[file] = true
-		totalMatches++
-		fmt.Fprintf(&buf, "%s:%s\n", file, lineNum)
+		file, lineNum, content := parts[0], parts[1], parts[2]
+		if _, seen := fileMatches[file]; !seen {
+			fileOrder = append(fileOrder, file)
+		}
+		fileMatches[file] = append(fileMatches[file], grepMatch{lineNum, content})
 	}
 
-	fmt.Fprintf(&buf, "(%d matches in %d files)\n", totalMatches, len(fileSet))
+	sort.Strings(fileOrder)
+
+	totalMatches := 0
+	for _, m := range fileMatches {
+		totalMatches += len(m)
+	}
+
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%d matches in %dF:\n", totalMatches, len(fileOrder))
+
+	shown := 0
+	for _, file := range fileOrder {
+		if shown >= grepMaxResults {
+			break
+		}
+		matches := fileMatches[file]
+		fmt.Fprintf(&buf, "\n[file] %s (%d):\n", abbreviatePath(file), len(matches))
+		perFile := matches
+		overflow := 0
+		if len(matches) > grepMaxPerFile {
+			perFile = matches[:grepMaxPerFile]
+			overflow = len(matches) - grepMaxPerFile
+		}
+		for _, m := range perFile {
+			if shown >= grepMaxResults {
+				overflow += len(perFile) - (len(perFile) - overflow) // remaining
+				break
+			}
+			fmt.Fprintf(&buf, "  %s: %s\n", m.lineNum, truncateLine(m.content))
+			shown++
+		}
+		if overflow > 0 {
+			fmt.Fprintf(&buf, "  +%d more\n", overflow)
+		}
+	}
+	if shown >= grepMaxResults && totalMatches > shown {
+		fmt.Fprintf(&buf, "\n[truncated: %d total matches, showing first %d]\n", totalMatches, shown)
+	}
+
 	return buf.String()
 }
 
@@ -106,9 +177,9 @@ func nativeGrep(pattern string, searchPath string) (string, string) {
 	absPath, _ := filepath.Abs(searchPath)
 	matcher := ignore.NewMatcher(absPath)
 
-	var rawBuf, buf bytes.Buffer
-	totalMatches := 0
-	fileSet := map[string]bool{}
+	fileOrder := []string{}
+	fileMatches := map[string][]grepMatch{}
+	var rawBuf bytes.Buffer
 
 	filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -142,18 +213,55 @@ func nativeGrep(pattern string, searchPath string) (string, string) {
 		for i, line := range lines {
 			if re.MatchString(line) {
 				rawBuf.WriteString(fmt.Sprintf("%s:%d:%s\n", rel, i+1, line))
-				fmt.Fprintf(&buf, "%s:%d\n", rel, i+1)
-				fileSet[rel] = true
-				totalMatches++
+				if _, seen := fileMatches[rel]; !seen {
+					fileOrder = append(fileOrder, rel)
+				}
+				fileMatches[rel] = append(fileMatches[rel], grepMatch{fmt.Sprintf("%d", i+1), line})
 			}
 		}
 		return nil
 	})
 
-	sort.Strings(nil) // keep deterministic
-	if totalMatches == 0 {
+	if len(fileOrder) == 0 {
 		return rawBuf.String(), "(no matches)\n"
 	}
-	fmt.Fprintf(&buf, "(%d matches in %d files)\n", totalMatches, len(fileSet))
+
+	totalMatches := 0
+	for _, m := range fileMatches {
+		totalMatches += len(m)
+	}
+
+	sort.Strings(fileOrder)
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "%d matches in %dF:\n", totalMatches, len(fileOrder))
+
+	shown := 0
+	for _, file := range fileOrder {
+		if shown >= grepMaxResults {
+			break
+		}
+		matches := fileMatches[file]
+		fmt.Fprintf(&buf, "\n[file] %s (%d):\n", abbreviatePath(file), len(matches))
+		perFile := matches
+		overflow := 0
+		if len(matches) > grepMaxPerFile {
+			perFile = matches[:grepMaxPerFile]
+			overflow = len(matches) - grepMaxPerFile
+		}
+		for _, m := range perFile {
+			if shown >= grepMaxResults {
+				break
+			}
+			fmt.Fprintf(&buf, "  %s: %s\n", m.lineNum, truncateLine(m.content))
+			shown++
+		}
+		if overflow > 0 {
+			fmt.Fprintf(&buf, "  +%d more\n", overflow)
+		}
+	}
+	if shown >= grepMaxResults && totalMatches > shown {
+		fmt.Fprintf(&buf, "\n[truncated: %d total matches, showing first %d]\n", totalMatches, shown)
+	}
+
 	return rawBuf.String(), buf.String()
 }

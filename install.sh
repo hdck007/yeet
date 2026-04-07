@@ -166,19 +166,34 @@ if $DO_CLAUDE; then
   CLAUDE_MD="$CLAUDE_GLOBAL/CLAUDE.md"
   AWARENESS_REF="@yeet-awareness.md"
 
-  info "Downloading yeet-awareness.md..."
+  # Always re-download so the awareness stays current with every install/upgrade
+  info "Downloading yeet-awareness.md (latest)..."
   curl -fsSL "$RAW_BASE/hooks/claude/yeet-awareness.md" -o "$AWARENESS_FILE" \
     || die "Failed to download yeet-awareness.md"
   ok "Awareness instructions → $AWARENESS_FILE"
 
+  # Ensure @yeet-awareness.md is the FIRST line of CLAUDE.md so it takes
+  # precedence over any other project-level instructions.
   if [ ! -f "$CLAUDE_MD" ]; then
     printf '%s\n' "$AWARENESS_REF" > "$CLAUDE_MD"
-    ok "Created ~/.claude/CLAUDE.md with @yeet-awareness.md reference"
-  elif ! grep -qF "$AWARENESS_REF" "$CLAUDE_MD"; then
-    printf '\n%s\n' "$AWARENESS_REF" >> "$CLAUDE_MD"
-    ok "Added @yeet-awareness.md to ~/.claude/CLAUDE.md"
+    ok "Created ~/.claude/CLAUDE.md with @yeet-awareness.md as first entry"
+  elif grep -qF "$AWARENESS_REF" "$CLAUDE_MD"; then
+    # Already present — move it to the top if it is not already there
+    if [ "$(head -1 "$CLAUDE_MD")" != "$AWARENESS_REF" ]; then
+      TMP_MD="$(mktemp)"
+      printf '%s\n' "$AWARENESS_REF" > "$TMP_MD"
+      grep -vF "$AWARENESS_REF" "$CLAUDE_MD" >> "$TMP_MD"
+      mv "$TMP_MD" "$CLAUDE_MD"
+      ok "Moved @yeet-awareness.md to top of ~/.claude/CLAUDE.md"
+    else
+      ok "~/.claude/CLAUDE.md already has @yeet-awareness.md at top"
+    fi
   else
-    ok "~/.claude/CLAUDE.md already references yeet-awareness.md"
+    TMP_MD="$(mktemp)"
+    printf '%s\n' "$AWARENESS_REF" > "$TMP_MD"
+    cat "$CLAUDE_MD" >> "$TMP_MD"
+    mv "$TMP_MD" "$CLAUDE_MD"
+    ok "Prepended @yeet-awareness.md to ~/.claude/CLAUDE.md (top priority)"
   fi
 fi
 
@@ -193,7 +208,8 @@ if $DO_COPILOT; then
   GITHUB_HOOKS_DIR="$GITHUB_DIR/hooks"
   mkdir -p "$GITHUB_HOOKS_DIR"
 
-  info "Downloading copilot-instructions.md..."
+  # Always re-download so the awareness stays current with every install/upgrade
+  info "Downloading copilot-instructions.md (latest)..."
   curl -fsSL "$RAW_BASE/hooks/copilot/yeet-awareness.md" \
     -o "$GITHUB_DIR/copilot-instructions.md" \
     || die "Failed to download copilot-instructions.md"

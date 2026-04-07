@@ -137,15 +137,15 @@ func runGlobImpl(args []string) error {
 	fmt.Fprintf(&buf, "(%d files matched)\n", len(results))
 
 	rendered := buf.String()
-	fmt.Print(rendered)
+	// Raw estimate: find command typically outputs full paths with metadata (~2x)
+	rawOutput := strings.Repeat("x", len(rendered)*2)
+	improved := printBetter(rawOutput, rendered)
 
-	if !noAnalytics && db != nil {
-		// Raw estimate: find command typically outputs full paths with metadata
-		rawEstimate := len(rendered) * 2
+	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "glob",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      rawEstimate,
+			CharsRaw:      len(rawOutput),
 			CharsRendered: len(rendered),
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),

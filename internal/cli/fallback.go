@@ -60,3 +60,15 @@ func runWithFallback(subcmd string, cmdArgs []string, fn func() error, fb Fallba
 	}
 	return nil
 }
+
+// printBetter prints filtered if it's shorter than raw; otherwise prints raw.
+// Returns true if filtered was used (gain achieved), false if raw was passed through.
+// Analytics should only be recorded when this returns true.
+func printBetter(raw, filtered string) bool {
+	if len(filtered) < len(raw) {
+		fmt.Print(filtered)
+		return true
+	}
+	fmt.Print(raw)
+	return false
+}
