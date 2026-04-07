@@ -202,18 +202,17 @@ if $DO_COPILOT; then
   echo ""
   echo -e "${BOLD}  Setting up GitHub Copilot${RESET}"
 
-  # Copilot files are project-specific — install into current directory
-  PROJECT_DIR="$PWD"
-  GITHUB_DIR="$PROJECT_DIR/.github"
-  GITHUB_HOOKS_DIR="$GITHUB_DIR/hooks"
+  GITHUB_HOOKS_DIR="$PWD/.github/hooks"
   mkdir -p "$GITHUB_HOOKS_DIR"
 
-  # Always re-download so the awareness stays current with every install/upgrade
+  # Install copilot-instructions.md globally so Copilot picks it up in every project
+  GLOBAL_COPILOT_DIR="$HOME/.copilot"
+  mkdir -p "$GLOBAL_COPILOT_DIR"
   info "Downloading copilot-instructions.md (latest)..."
   curl -fsSL "$RAW_BASE/hooks/copilot/yeet-awareness.md" \
-    -o "$GITHUB_DIR/copilot-instructions.md" \
+    -o "$GLOBAL_COPILOT_DIR/copilot-instructions.md" \
     || die "Failed to download copilot-instructions.md"
-  ok "Copilot instructions → $GITHUB_DIR/copilot-instructions.md"
+  ok "Copilot instructions (global) → $GLOBAL_COPILOT_DIR/copilot-instructions.md"
 
   info "Downloading yeet-rewrite.sh..."
   curl -fsSL "$RAW_BASE/.github/hooks/yeet-rewrite.sh" \

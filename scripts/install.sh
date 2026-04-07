@@ -195,13 +195,14 @@ if $DO_COPILOT; then
   echo ""
   echo -e "${BOLD}  [3/4] GitHub Copilot (VS Code) integration${RESET}"
 
-  GITHUB_DIR="$TARGET/.github"
-  HOOKS_DIR="$GITHUB_DIR/hooks"
+  HOOKS_DIR="$TARGET/.github/hooks"
   mkdir -p "$HOOKS_DIR"
 
-  # copilot-instructions.md (source of truth: hooks/copilot/yeet-awareness.md)
-  cp "$YEET_REPO/hooks/copilot/yeet-awareness.md" "$GITHUB_DIR/copilot-instructions.md"
-  ok "Copilot instructions → $GITHUB_DIR/copilot-instructions.md"
+  # Install copilot-instructions.md globally so Copilot picks it up in every project
+  GLOBAL_COPILOT_DIR="$HOME/.copilot"
+  mkdir -p "$GLOBAL_COPILOT_DIR"
+  cp "$YEET_REPO/hooks/copilot/yeet-awareness.md" "$GLOBAL_COPILOT_DIR/copilot-instructions.md"
+  ok "Copilot instructions (global) → $GLOBAL_COPILOT_DIR/copilot-instructions.md"
 
   # Hook script + config
   cp "$YEET_REPO/.github/hooks/yeet-rewrite.sh"  "$HOOKS_DIR/yeet-rewrite.sh"
