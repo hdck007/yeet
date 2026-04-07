@@ -9,6 +9,11 @@ type CommandStats struct {
 	TokensSaved    int
 }
 
+type CommandUsages struct {
+	CommandName string
+	ArgsSummary string
+}
+
 func (d *DB) GetAllStats() ([]CommandStats, error) {
 	rows, err := d.conn.Query(`
 		SELECT command_name, total_runs, total_chars_raw, total_chars_rendered, total_chars_saved, total_tokens_saved
@@ -24,6 +29,28 @@ func (d *DB) GetAllStats() ([]CommandStats, error) {
 	for rows.Next() {
 		var s CommandStats
 		if err := rows.Scan(&s.CommandName, &s.TotalRuns, &s.CharsRaw, &s.CharsRendered, &s.CharsSaved, &s.TokensSaved); err != nil {
+			return nil, err
+		}
+		stats = append(stats, s)
+	}
+	return stats, rows.Err()
+}
+
+func (d *DB) GetUsages() ([]CommandUsages, error) {
+	rows, err := d.conn.Query(`
+		SELECT command_name, args_summary 
+		FROM command_parents as cmd_p join command_usages as cmd_u 
+		ON cmd_p.id = cmd_u.command_parent_id 
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []CommandUsages
+	for rows.Next() {
+		var s CommandUsages
+		if err := rows.Scan(&s.CommandName, &s.ArgsSummary); err != nil {
 			return nil, err
 		}
 		stats = append(stats, s)
