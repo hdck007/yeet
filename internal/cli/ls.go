@@ -27,9 +27,16 @@ func init() {
 // parseLSArgs splits raw cobra args into (showAll, extraFlags, paths).
 // It mirrors rtk's approach: always run ls -la, pass any extra short flags
 // (stripping l/a/h which we always set), pass unknown long flags as-is.
+var yeetPersistentFlags = map[string]bool{
+	"--no-analytics": true,
+	"--raw":          true,
+}
+
 func parseLSArgs(args []string) (showAll bool, extraFlags []string, paths []string) {
 	for _, a := range args {
-		if a == "--all" {
+		if yeetPersistentFlags[a] {
+			continue // strip yeet-owned flags before passing to system ls
+		} else if a == "--all" {
 			showAll = true
 		} else if strings.HasPrefix(a, "--") {
 			extraFlags = append(extraFlags, a)
