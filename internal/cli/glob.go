@@ -28,6 +28,28 @@ func init() {
 }
 
 func runGlob(cmd *cobra.Command, args []string) error {
+	return runWithFallback("glob", args, func() error {
+		return runGlobImpl(args)
+	}, Fallback{
+		Bin: "find",
+		Args: func(a []string) []string {
+			path := "."
+			if len(a) > 1 {
+				path = a[1]
+			}
+			pat := a[0]
+			for i := len(pat) - 1; i >= 0; i-- {
+				if pat[i] == '/' {
+					pat = pat[i+1:]
+					break
+				}
+			}
+			return []string{path, "-name", pat}
+		},
+	})
+}
+
+func runGlobImpl(args []string) error {
 	start := time.Now()
 
 	pattern := args[0]
