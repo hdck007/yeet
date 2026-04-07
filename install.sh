@@ -202,7 +202,8 @@ if $DO_COPILOT; then
   echo ""
   echo -e "${BOLD}  Setting up GitHub Copilot${RESET}"
 
-  GITHUB_HOOKS_DIR="$PWD/.github/hooks"
+  PROJECT_DIR="$PWD"
+  GITHUB_HOOKS_DIR="$PROJECT_DIR/.github/hooks"
   mkdir -p "$GITHUB_HOOKS_DIR"
 
   # Install copilot-instructions.md globally so Copilot picks it up in every project
