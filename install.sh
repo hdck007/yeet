@@ -103,50 +103,38 @@ ok "Proxy hook → $HOOKS_DIR/yeet-proxy.sh"
 SETTINGS_FILE="$CLAUDE_GLOBAL/settings.json"
 HOOK_CMD="bash \"$HOOKS_DIR/yeet-proxy.sh\""
 
+# Always write yeet's settings fresh — replace any existing yeet hooks with current values
+TMP_SETTINGS="$(mktemp)"
+
+# Build the yeet hook entries
+YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" '[
+  {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
+  {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
+  {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
+  {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `cat <<\'\''EOF'\'' | yeet write <file>` instead of the Write tool.'\'' >&2; exit 2"}]},
+  {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
+  {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
+]')
+
 if [ ! -f "$SETTINGS_FILE" ]; then
-  jq -n --arg cmd "$HOOK_CMD" '{
-    "hooks": {
-      "PreToolUse": [
-        {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
-        {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
-        {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-        {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `cat <<\'EOF\' | yeet write <file>` instead of the Write tool.'\'' >&2; exit 2"}]},
-        {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
-        {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
-      ]
-    }
-  } | . + {"autoCompactThreshold": 100000}' > "$SETTINGS_FILE"
-  ok "Created ~/.claude/settings.json with blocking hooks + proxy hook" 
+  # Fresh install — create from scratch
+  jq -n --argjson hooks "$YEET_HOOKS" \
+    '{"hooks": {"PreToolUse": $hooks}, "autoCompactThreshold": 100000}' \
+    > "$SETTINGS_FILE"
+  ok "Created ~/.claude/settings.json"
 else
-  TMP_SETTINGS="$(mktemp)"
-  jq --arg cmd "$HOOK_CMD" '
-    .hooks                //= {} |
-    .hooks.PreToolUse     //= [] |
-
-    # Ensure Bash proxy hook is present
-    ( if (.hooks.PreToolUse | map(.hooks // [] | map(.command) | any(. == $cmd)) | any)
-      then .
-      else .hooks.PreToolUse += [{"matcher": "Bash", "hooks": [{"type": "command", "command": $cmd}]}]
-      end ) |
-
-    # Ensure blocking hooks are present (idempotent by matcher)
-    ( . as $root |
-      [ "Read", "Glob", "Grep", "Write", "Edit" ] |
-      reduce .[] as $m (
-        $root;
-        if (.hooks.PreToolUse | map(.matcher) | any(. == $m)) then .
-        else
-          .hooks.PreToolUse = (
-            [ { "matcher": $m,
-                "hooks": [{ "type": "command",
-                            "command": ("echo '\''BLOCKED: use yeet instead of the " + $m + " tool.'\'' >&2; exit 2") }] }
-            ] + .hooks.PreToolUse
-          )
-        end
-      )
-    )
-  ' "$SETTINGS_FILE"     | jq '. + {"autoCompactThreshold": 100000}'     > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
-  ok "Updated ~/.claude/settings.json"  
+  # Existing settings — remove stale yeet hooks, re-inject current ones, preserve everything else
+  jq --argjson hooks "$YEET_HOOKS" '
+    .hooks             //= {} |
+    .hooks.PreToolUse  //= [] |
+    # Strip only yeet-managed hooks (identified by _yeet:true), preserving any other hooks
+    .hooks.PreToolUse  |= map(select(._yeet != true)) |
+    # Prepend fresh yeet hooks
+    .hooks.PreToolUse  = $hooks + .hooks.PreToolUse |
+    # Always set compaction threshold
+    .autoCompactThreshold = 100000
+  ' "$SETTINGS_FILE" > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
+  ok "Updated ~/.claude/settings.json"
 fi
 
 # --- 6. Install yeet awareness instructions for Claude Code -------------------
