@@ -87,86 +87,169 @@ if ! command -v jq &>/dev/null; then
   ok "jq installed"
 fi
 
-# ─── 5. Set up Claude Code global proxy hook ──────────────────────────────────
+# ─── 5. Choose AI integration ─────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}  Setting up Claude Code (global)${RESET}"
+echo -e "${BOLD}  AI integration${RESET}"
+echo ""
+echo -e "  Which AI assistant do you use?"
+echo ""
+echo -e "  ${CYAN}1)${RESET} Claude Code"
+echo -e "  ${CYAN}2)${RESET} GitHub Copilot"
+echo -e "  ${CYAN}3)${RESET} Both"
+echo -e "  ${CYAN}4)${RESET} Skip"
+echo ""
 
-HOOKS_DIR="$CLAUDE_GLOBAL/hooks"
-mkdir -p "$HOOKS_DIR"
+# Read from /dev/tty so this works when piped through curl | bash
+CHOICE=""
+if [ -t 0 ]; then
+  read -r -p "  Choice [3]: " CHOICE
+elif [ -e /dev/tty ]; then
+  read -r -p "  Choice [3]: " CHOICE </dev/tty
+fi
+CHOICE="${CHOICE:-3}"
 
-info "Downloading yeet-proxy.sh..."
-curl -fsSL "$RAW_BASE/hooks/yeet-proxy.sh" -o "$HOOKS_DIR/yeet-proxy.sh" \
-  || die "Failed to download yeet-proxy.sh"
-chmod +x "$HOOKS_DIR/yeet-proxy.sh"
-ok "Proxy hook → $HOOKS_DIR/yeet-proxy.sh"
+DO_CLAUDE=false
+DO_COPILOT=false
+case "$CHOICE" in
+  1) DO_CLAUDE=true ;;
+  2) DO_COPILOT=true ;;
+  3) DO_CLAUDE=true; DO_COPILOT=true ;;
+  4) ;;
+  *) warn "Invalid choice '$CHOICE', defaulting to both"; DO_CLAUDE=true; DO_COPILOT=true ;;
+esac
 
-SETTINGS_FILE="$CLAUDE_GLOBAL/settings.json"
-HOOK_CMD="bash \"$HOOKS_DIR/yeet-proxy.sh\""
+# ─── 6. Claude Code setup ────────────────────────────────────────────────────
+if $DO_CLAUDE; then
+  echo ""
+  echo -e "${BOLD}  Setting up Claude Code (global)${RESET}"
 
-# Always write yeet's settings fresh — replace any existing yeet hooks with current values
-TMP_SETTINGS="$(mktemp)"
+  HOOKS_DIR="$CLAUDE_GLOBAL/hooks"
+  mkdir -p "$HOOKS_DIR"
 
-# Build the yeet hook entries
-# Use --arg for the Write command so jq handles JSON encoding (avoids <<'EOF' quoting issue)
-WRITE_CMD='echo "BLOCKED: Use `cat <<'"'"'EOF'"'"' | yeet write <file>` instead of the Write tool." >&2; exit 2'
-YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" --arg write_cmd "$WRITE_CMD" '[
-  {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
-  {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
-  {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-  {"matcher": "Write", "hooks": [{"type": "command", "command": $write_cmd}]},
-  {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
-  {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
-]')
+  info "Downloading yeet-proxy.sh..."
+  curl -fsSL "$RAW_BASE/hooks/yeet-proxy.sh" -o "$HOOKS_DIR/yeet-proxy.sh" \
+    || die "Failed to download yeet-proxy.sh"
+  chmod +x "$HOOKS_DIR/yeet-proxy.sh"
+  ok "Proxy hook → $HOOKS_DIR/yeet-proxy.sh"
 
-if [ ! -f "$SETTINGS_FILE" ]; then
-  # Fresh install — create from scratch
-  jq -n --argjson hooks "$YEET_HOOKS" \
-    '{"hooks": {"PreToolUse": $hooks}, "autoCompactThreshold": 100000}' \
-    > "$SETTINGS_FILE"
-  ok "Created ~/.claude/settings.json"
-else
-  # Existing settings — remove stale yeet hooks, re-inject current ones, preserve everything else
-  jq --argjson hooks "$YEET_HOOKS" '
-    .hooks             //= {} |
-    .hooks.PreToolUse  //= [] |
-    # Strip only yeet-managed hooks (identified by _yeet:true), preserving any other hooks
-    .hooks.PreToolUse  |= map(select(._yeet != true)) |
-    # Prepend fresh yeet hooks
-    .hooks.PreToolUse  = $hooks + .hooks.PreToolUse |
-    # Always set compaction threshold
-    .autoCompactThreshold = 100000
-  ' "$SETTINGS_FILE" > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
-  ok "Updated ~/.claude/settings.json"
+  SETTINGS_FILE="$CLAUDE_GLOBAL/settings.json"
+  HOOK_CMD="bash \"$HOOKS_DIR/yeet-proxy.sh\""
+  TMP_SETTINGS="$(mktemp)"
+
+  WRITE_CMD='echo "BLOCKED: Use `cat <<'"'"'EOF'"'"' | yeet write <file>` instead of the Write tool." >&2; exit 2'
+  YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" --arg write_cmd "$WRITE_CMD" '[
+    {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Write", "hooks": [{"type": "command", "command": $write_cmd}]},
+    {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
+  ]')
+
+  if [ ! -f "$SETTINGS_FILE" ]; then
+    jq -n --argjson hooks "$YEET_HOOKS" \
+      '{"hooks": {"PreToolUse": $hooks}, "autoCompactThreshold": 100000}' \
+      > "$SETTINGS_FILE"
+    ok "Created ~/.claude/settings.json"
+  else
+    jq --argjson hooks "$YEET_HOOKS" '
+      .hooks             //= {} |
+      .hooks.PreToolUse  //= [] |
+      .hooks.PreToolUse  |= map(select(._yeet != true)) |
+      .hooks.PreToolUse  = $hooks + .hooks.PreToolUse |
+      .autoCompactThreshold = 100000
+    ' "$SETTINGS_FILE" > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
+    ok "Updated ~/.claude/settings.json"
+  fi
+
+  AWARENESS_FILE="$CLAUDE_GLOBAL/yeet-awareness.md"
+  CLAUDE_MD="$CLAUDE_GLOBAL/CLAUDE.md"
+  AWARENESS_REF="@yeet-awareness.md"
+
+  info "Downloading yeet-awareness.md..."
+  curl -fsSL "$RAW_BASE/hooks/claude/yeet-awareness.md" -o "$AWARENESS_FILE" \
+    || die "Failed to download yeet-awareness.md"
+  ok "Awareness instructions → $AWARENESS_FILE"
+
+  if [ ! -f "$CLAUDE_MD" ]; then
+    printf '%s\n' "$AWARENESS_REF" > "$CLAUDE_MD"
+    ok "Created ~/.claude/CLAUDE.md with @yeet-awareness.md reference"
+  elif ! grep -qF "$AWARENESS_REF" "$CLAUDE_MD"; then
+    printf '\n%s\n' "$AWARENESS_REF" >> "$CLAUDE_MD"
+    ok "Added @yeet-awareness.md to ~/.claude/CLAUDE.md"
+  else
+    ok "~/.claude/CLAUDE.md already references yeet-awareness.md"
+  fi
 fi
 
-# --- 6. Install yeet awareness instructions for Claude Code -------------------
-AWARENESS_FILE="$CLAUDE_GLOBAL/yeet-awareness.md"
-CLAUDE_MD="$CLAUDE_GLOBAL/CLAUDE.md"
-AWARENESS_REF="@yeet-awareness.md"
+# ─── 7. Copilot setup ────────────────────────────────────────────────────────
+if $DO_COPILOT; then
+  echo ""
+  echo -e "${BOLD}  Setting up GitHub Copilot${RESET}"
 
-info "Downloading yeet-awareness.md..."
-curl -fsSL "$RAW_BASE/hooks/claude/yeet-awareness.md" -o "$AWARENESS_FILE" \
-  || die "Failed to download yeet-awareness.md"
-ok "Awareness instructions → $AWARENESS_FILE"
+  # Copilot files are project-specific — install into current directory
+  PROJECT_DIR="$PWD"
+  GITHUB_DIR="$PROJECT_DIR/.github"
+  GITHUB_HOOKS_DIR="$GITHUB_DIR/hooks"
+  mkdir -p "$GITHUB_HOOKS_DIR"
 
-if [ ! -f "$CLAUDE_MD" ]; then
-  printf '%s\n' "$AWARENESS_REF" > "$CLAUDE_MD"
-  ok "Created ~/.claude/CLAUDE.md with @yeet-awareness.md reference"
-elif ! grep -qF "$AWARENESS_REF" "$CLAUDE_MD"; then
-  printf '\n%s\n' "$AWARENESS_REF" >> "$CLAUDE_MD"
-  ok "Added @yeet-awareness.md to ~/.claude/CLAUDE.md"
-else
-  ok "~/.claude/CLAUDE.md already references yeet-awareness.md"
+  info "Downloading copilot-instructions.md..."
+  curl -fsSL "$RAW_BASE/hooks/copilot/yeet-awareness.md" \
+    -o "$GITHUB_DIR/copilot-instructions.md" \
+    || die "Failed to download copilot-instructions.md"
+  ok "Copilot instructions → $GITHUB_DIR/copilot-instructions.md"
+
+  info "Downloading yeet-rewrite.sh..."
+  curl -fsSL "$RAW_BASE/.github/hooks/yeet-rewrite.sh" \
+    -o "$GITHUB_HOOKS_DIR/yeet-rewrite.sh" \
+    || die "Failed to download yeet-rewrite.sh"
+  chmod +x "$GITHUB_HOOKS_DIR/yeet-rewrite.sh"
+  ok "PreToolUse hook → $GITHUB_HOOKS_DIR/yeet-rewrite.sh"
+
+  info "Downloading yeet-rewrite.json..."
+  curl -fsSL "$RAW_BASE/.github/hooks/yeet-rewrite.json" \
+    -o "$GITHUB_HOOKS_DIR/yeet-rewrite.json" \
+    || die "Failed to download yeet-rewrite.json"
+  ok "Hook config → $GITHUB_HOOKS_DIR/yeet-rewrite.json"
+
+  # VS Code settings
+  VSCODE_DIR="$PROJECT_DIR/.vscode"
+  VSCODE_SETTINGS="$VSCODE_DIR/settings.json"
+  mkdir -p "$VSCODE_DIR"
+
+  if [ ! -f "$VSCODE_SETTINGS" ]; then
+    cat > "$VSCODE_SETTINGS" << 'JSON'
+{
+  "github.copilot.chat.agent.enabled": true,
+  "github.copilot.chat.agent.runTasks": true,
+  "github.copilot.chat.useProjectTemplates": true
+}
+JSON
+    ok "VS Code settings → $VSCODE_SETTINGS"
+  else
+    warn ".vscode/settings.json already exists — add these manually if needed:"
+    warn "  \"github.copilot.chat.agent.enabled\": true"
+    warn "  \"github.copilot.chat.agent.runTasks\": true"
+  fi
+
+  echo ""
+  echo -e "  ${DIM}Installed to: $PROJECT_DIR${RESET}"
+  echo -e "  ${DIM}Commit .github/ to your repo so teammates get it too.${RESET}"
 fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "  ${BOLD}${GREEN}Done.${RESET}"
 echo ""
-echo -e "  ${DIM}Proxy hook active globally: cat/grep/ls/find/diff → yeet equivalents${RESET}"
-echo -e "  ${DIM}Native tool blocking active: Read/Glob/Grep/Write/Edit → yeet${RESET}"
-echo -e "  ${DIM}Awareness instructions loaded into Claude's global context${RESET}"
-echo -e "  ${DIM}Restart Claude Code to pick up the changes.${RESET}"
+
+if $DO_CLAUDE; then
+  echo -e "  ${DIM}Claude Code: proxy hook active globally, awareness loaded${RESET}"
+  echo -e "  ${DIM}Restart Claude Code to pick up the changes.${RESET}"
+fi
+if $DO_COPILOT; then
+  echo -e "  ${DIM}Copilot: instructions + PreToolUse hook installed in $PWD/.github/${RESET}"
+fi
+
 echo ""
 echo -e "  Verify:"
 echo -e "    ${CYAN}yeet version${RESET}"
