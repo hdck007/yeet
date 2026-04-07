@@ -26,6 +26,21 @@ func init() {
 }
 
 func runFind(cmd *cobra.Command, args []string) error {
+	return runWithFallback("find", args, func() error {
+		return runFindImpl(args)
+	}, Fallback{
+		Bin: "find",
+		Args: func(a []string) []string {
+			path := "."
+			if len(a) > 1 {
+				path = a[1]
+			}
+			return []string{path, "-name", a[0]}
+		},
+	})
+}
+
+func runFindImpl(args []string) error {
 	start := time.Now()
 
 	pattern := args[0]

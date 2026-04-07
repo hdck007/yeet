@@ -47,6 +47,12 @@ func init() {
 }
 
 func runEdit(cmd *cobra.Command, args []string) error {
+	return runWithFallback("edit", args, func() error {
+		return runEditImpl(args)
+	}, NoFallback)
+}
+
+func runEditImpl(args []string) error {
 	start := time.Now()
 	filename := args[0]
 

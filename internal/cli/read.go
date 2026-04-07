@@ -48,6 +48,15 @@ func init() {
 }
 
 func runRead(cmd *cobra.Command, args []string) error {
+	return runWithFallback("read", args, func() error {
+		return runReadImpl(args)
+	}, Fallback{
+		Bin: "cat",
+		Args: func(a []string) []string { return a },
+	})
+}
+
+func runReadImpl(args []string) error {
 	level := filter.ParseFilterLevel(readLevel)
 
 	if len(args) == 0 || args[0] == "-" {

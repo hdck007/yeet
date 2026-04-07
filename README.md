@@ -143,6 +143,14 @@ Bash: grep foo .      →  yeet grep foo .      (rewritten silently)
 
 `jq` is required for the proxy hook and auto-installed if missing.
 
+### Compaction limit
+
+The installer sets `autoCompactThreshold` to **100,000 tokens** in `~/.claude/settings.json`. This tells Claude Code to compact the conversation earlier, keeping context lean across long sessions. You can adjust it manually:
+
+```json
+{ "autoCompactThreshold": 100000 }
+```
+
 ---
 
 ## 🐙 GitHub Copilot (VS Code) Setup

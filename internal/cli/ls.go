@@ -26,6 +26,20 @@ func init() {
 }
 
 func runLS(cmd *cobra.Command, args []string) error {
+	return runWithFallback("ls", args, func() error {
+		return runLSImpl(args)
+	}, Fallback{
+		Bin: "ls",
+		Args: func(a []string) []string {
+			if len(a) == 0 {
+				return []string{"-la", "."}
+			}
+			return []string{"-la", a[0]}
+		},
+	})
+}
+
+func runLSImpl(args []string) error {
 	start := time.Now()
 
 	path := "."

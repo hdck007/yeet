@@ -22,6 +22,15 @@ func init() {
 }
 
 func runSmart(cmd *cobra.Command, args []string) error {
+	return runWithFallback("smart", args, func() error {
+		return runSmartImpl(args)
+	}, Fallback{
+		Bin: "cat",
+		Args: func(a []string) []string { return a },
+	})
+}
+
+func runSmartImpl(args []string) error {
 	start := time.Now()
 	filename := args[0]
 

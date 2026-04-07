@@ -25,6 +25,15 @@ func init() {
 }
 
 func runDiff(cmd *cobra.Command, args []string) error {
+	return runWithFallback("diff", args, func() error {
+		return runDiffImpl(args)
+	}, Fallback{
+		Bin: "diff",
+		Args: func(a []string) []string { return a },
+	})
+}
+
+func runDiffImpl(args []string) error {
 	start := time.Now()
 
 	file1, file2 := args[0], args[1]

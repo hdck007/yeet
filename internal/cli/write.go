@@ -34,6 +34,12 @@ func init() {
 }
 
 func runWrite(cmd *cobra.Command, args []string) error {
+	return runWithFallback("write", args, func() error {
+		return runWriteImpl(args)
+	}, NoFallback)
+}
+
+func runWriteImpl(args []string) error {
 	start := time.Now()
 	filename := args[0]
 

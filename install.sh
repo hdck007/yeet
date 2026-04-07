@@ -110,12 +110,12 @@ if [ ! -f "$SETTINGS_FILE" ]; then
         {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
         {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
         {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-        {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet write <file> --b64 <base64>` instead of the Write tool.'\'' >&2; exit 2"}]},
+        {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `cat <<\'EOF\' | yeet write <file>` instead of the Write tool.'\'' >&2; exit 2"}]},
         {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
         {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
       ]
     }
-  }' > "$SETTINGS_FILE"
+  } | . + {"autoCompactThreshold": 100000}' > "$SETTINGS_FILE"
   ok "Created ~/.claude/settings.json with blocking hooks + proxy hook" 
 else
   TMP_SETTINGS="$(mktemp)"
@@ -145,8 +145,28 @@ else
         end
       )
     )
-  ' "$SETTINGS_FILE" > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
+  ' "$SETTINGS_FILE"     | jq '. + {"autoCompactThreshold": 100000}'     > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
   ok "Updated ~/.claude/settings.json"  
+fi
+
+# --- 6. Install yeet awareness instructions for Claude Code -------------------
+AWARENESS_FILE="$CLAUDE_GLOBAL/yeet-awareness.md"
+CLAUDE_MD="$CLAUDE_GLOBAL/CLAUDE.md"
+AWARENESS_REF="@yeet-awareness.md"
+
+info "Downloading yeet-awareness.md..."
+curl -fsSL "$RAW_BASE/hooks/claude/yeet-awareness.md" -o "$AWARENESS_FILE" \
+  || die "Failed to download yeet-awareness.md"
+ok "Awareness instructions → $AWARENESS_FILE"
+
+if [ ! -f "$CLAUDE_MD" ]; then
+  printf '%s\n' "$AWARENESS_REF" > "$CLAUDE_MD"
+  ok "Created ~/.claude/CLAUDE.md with @yeet-awareness.md reference"
+elif ! grep -qF "$AWARENESS_REF" "$CLAUDE_MD"; then
+  printf '\n%s\n' "$AWARENESS_REF" >> "$CLAUDE_MD"
+  ok "Added @yeet-awareness.md to ~/.claude/CLAUDE.md"
+else
+  ok "~/.claude/CLAUDE.md already references yeet-awareness.md"
 fi
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
@@ -154,7 +174,9 @@ echo ""
 echo -e "  ${BOLD}${GREEN}Done.${RESET}"
 echo ""
 echo -e "  ${DIM}Proxy hook active globally: cat/grep/ls/find/diff → yeet equivalents${RESET}"
-echo -e "  ${DIM}Restart Claude Code to pick up the new hook.${RESET}"
+echo -e "  ${DIM}Native tool blocking active: Read/Glob/Grep/Write/Edit → yeet${RESET}"
+echo -e "  ${DIM}Awareness instructions loaded into Claude's global context${RESET}"
+echo -e "  ${DIM}Restart Claude Code to pick up the changes.${RESET}"
 echo ""
 echo -e "  Verify:"
 echo -e "    ${CYAN}yeet version${RESET}"
