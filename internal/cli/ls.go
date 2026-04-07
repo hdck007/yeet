@@ -80,6 +80,6 @@ func runLSImpl(args []string) error {
 func rawLSOutput(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	result := yeetexec.Run(ctx, "ls", "-laR", path)
+	result := yeetexec.Run(ctx, "ls", "-la", path)
 	return result.Stdout
 }
