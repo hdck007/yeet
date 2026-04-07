@@ -107,11 +107,13 @@ HOOK_CMD="bash \"$HOOKS_DIR/yeet-proxy.sh\""
 TMP_SETTINGS="$(mktemp)"
 
 # Build the yeet hook entries
-YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" '[
+# Use --arg for the Write command so jq handles JSON encoding (avoids <<'EOF' quoting issue)
+WRITE_CMD='echo "BLOCKED: Use `cat <<'"'"'EOF'"'"' | yeet write <file>` instead of the Write tool." >&2; exit 2'
+YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" --arg write_cmd "$WRITE_CMD" '[
   {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
   {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
   {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-  {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `cat <<\'\''EOF'\'' | yeet write <file>` instead of the Write tool.'\'' >&2; exit 2"}]},
+  {"matcher": "Write", "hooks": [{"type": "command", "command": $write_cmd}]},
   {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
   {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
 ]')
