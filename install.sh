@@ -138,12 +138,12 @@ if $DO_CLAUDE; then
 
   WRITE_CMD='echo "BLOCKED: Use `cat <<'"'"'EOF'"'"' | yeet write <file>` instead of the Write tool." >&2; exit 2'
   YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" --arg write_cmd "$WRITE_CMD" '[
-    {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
-    {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
-    {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-    {"matcher": "Write", "hooks": [{"type": "command", "command": $write_cmd}]},
-    {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
-    {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
+    {"matcher": "Read",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Glob",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Grep",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Write", "_yeet": true, "hooks": [{"type": "command", "command": $write_cmd}]},
+    {"matcher": "Edit",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
+    {"matcher": "Bash",  "_yeet": true, "hooks": [{"type": "command", "command": $cmd}]}
   ]')
 
   if [ ! -f "$SETTINGS_FILE" ]; then
@@ -155,7 +155,12 @@ if $DO_CLAUDE; then
     jq --argjson hooks "$YEET_HOOKS" '
       .hooks             //= {} |
       .hooks.PreToolUse  //= [] |
-      .hooks.PreToolUse  |= map(select(._yeet != true)) |
+      # Remove by marker (future installs) and by content (migrate legacy unmarked entries)
+      .hooks.PreToolUse  |= map(select(
+        ._yeet != true and
+        ((.matcher | IN("Read","Glob","Grep","Write","Edit")) and (.hooks // [] | map(.command) | any(test("yeet")))) != true and
+        ((.matcher == "Bash") and (.hooks // [] | map(.command) | any(test("yeet-proxy\\.sh")))) != true
+      )) |
       .hooks.PreToolUse  = $hooks + .hooks.PreToolUse |
       .autoCompactThreshold = 100000
     ' "$SETTINGS_FILE" > "$TMP_SETTINGS" && mv "$TMP_SETTINGS" "$SETTINGS_FILE"
