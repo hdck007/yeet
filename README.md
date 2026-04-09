@@ -71,6 +71,13 @@ src/
 curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
 ```
 
+### Uninstall
+```bash
+curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/uninstall.sh | bash
+```
+
+The uninstaller checks what's installed, shows you exactly what will be removed, and asks for confirmation before touching anything.
+
 ### Manual
 **Prerequisites:** Go 1.21+, a C compiler (for SQLite)
 
@@ -233,6 +240,28 @@ yeet clear            # Reset analytics DB
 yeet update           # Rebuild & reinstall from source
 yeet version          # Print version
 ```
+
+### Configuration
+
+**Auto-allow** — when enabled, Claude Code never prompts for permission before running a `yeet` command (including heredoc pipe forms like `cat <<'X' | yeet edit`):
+
+```bash
+yeet auto-allow         # show current state (default: false)
+yeet auto-allow true    # enable — no more permission prompts for yeet
+yeet auto-allow false   # disable
+```
+
+The install script asks about this during setup. Setting is stored in `~/.local/share/yeet/auto-allow`.
+
+**Read threshold** — number of lines at which `yeet read` (with no filter flags) warns and stops instead of dumping the whole file. Pushing the agent toward `grep` or `--lines` first:
+
+```bash
+yeet threshold          # show current effective threshold (default: 150)
+yeet threshold 200      # persist a new value (minimum: 100)
+yeet threshold reset    # remove persisted value, fall back to default
+```
+
+Override order: `--threshold` flag > `YEET_BIG_FILE_THRESHOLD` env var > persisted config > 150.
 
 ---
 
