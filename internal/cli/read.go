@@ -100,6 +100,9 @@ func getReadThreshold() int {
 			return n
 		}
 	}
+	if n := PersistedThreshold(); n > 0 {
+		return n
+	}
 	return 150
 }
 
@@ -171,10 +174,11 @@ func runFile(filename string, level filter.FilterLevel, maxLines, tailLines int,
 		if threshold > 0 {
 			lineCount := strings.Count(content, "\n") + 1
 			if lineCount > threshold {
-				fmt.Printf("yeet: %s has %d lines (threshold: %d). Use a targeted strategy:\n", filename, lineCount, threshold)
-				fmt.Printf("  Specific searches:   yeet grep \"<pattern>\" %s  (shows matches + 2 context lines)\n", filename)
-				fmt.Printf("  Signatures + linums: yeet read %s -l aggressive\n", filename)
-				fmt.Printf("  LAST RESORT only:    yeet read %s -l minimal  (only if absolutely necessary)\n", filename)
+				fmt.Printf("yeet: %s has %d lines (threshold: %d). Use --lines or grep instead of reading the whole file:\n", filename, lineCount, threshold)
+				fmt.Printf("  1. Search first:     yeet grep \"<pattern>\" %s\n", filename)
+				fmt.Printf("  2. Targeted lines:   yeet read %s --lines N-M\n", filename)
+				fmt.Printf("  3. Signatures only:  yeet read %s -l aggressive\n", filename)
+				fmt.Printf("  ⚠ LAST RESORT ONLY:  yeet read %s -l minimal  — high token cost, only if all else fails\n", filename)
 				return nil
 			}
 		}

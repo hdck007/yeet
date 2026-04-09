@@ -1,10 +1,8 @@
 package cli
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"strings"
+		"fmt"
+		"strings"
 
 	"github.com/hdck007/yeet/internal/analytics"
 	"github.com/spf13/cobra"
@@ -32,7 +30,7 @@ func runGetUsage(cmd *cobra.Command, args []string) error {
 	}
 	defer statsDB.Close()
 
-	if statsReset {
+	if usageReset {
 		if err := statsDB.ResetStats(); err != nil {
 			return fmt.Errorf("reset analytics: %w", err)
 		}
@@ -50,25 +48,16 @@ func runGetUsage(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if statsJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(stats)
-	}
-
 	printUsageTable(stats)
 	return nil
 }
 
 func printUsageTable(stats []analytics.CommandUsages) {
-	fmt.Printf("%-10s %100s\n",
-		"Command", "Args")
-	fmt.Println(strings.Repeat("─", 70))
+	fmt.Printf("%-20s  %s\n", "Command", "Args")
+	fmt.Println(strings.Repeat("─", 50))
 
 	for _, s := range stats {
-		fmt.Printf("%-10s %6d %12s %14s %7.1f%% %13s\n",
-			s.CommandName,
-			s.ArgsSummary)
+		fmt.Printf("%-20s  %s\n", s.CommandName, s.ArgsSummary)
 	}
 
 	fmt.Println(strings.Repeat("─", 70))
