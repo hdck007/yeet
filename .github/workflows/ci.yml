@@ -2,14 +2,14 @@ name: CI
 
 on:
   push:
-    branches: ["release/**"]
+    branches: ["main"]
   pull_request:
     branches: ["main"]
 
 jobs:
   release:
     runs-on: macos-15
-    if: startsWith(github.ref, 'refs/heads/release/')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
 
@@ -26,7 +26,7 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          VERSION=${GITHUB_REF_NAME#release/}
+          VERSION=$(cat VERSION)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Check for duplicate tag
@@ -42,8 +42,6 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p dist
 
-          # Note: Make sure the ./cmd/yeet/ path matches your repository structure! 
-          # If your main.go is in the root directory, change ./cmd/yeet/ to just .
           CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "-X github.com/hdck007/yeet/internal/cli.Version=$VERSION" -o dist/yeet-darwin-amd64 ./cmd/yeet/
           CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "-X github.com/hdck007/yeet/internal/cli.Version=$VERSION" -o dist/yeet-darwin-arm64 ./cmd/yeet/
           lipo -create -output dist/yeet-darwin-universal dist/yeet-darwin-amd64 dist/yeet-darwin-arm64
