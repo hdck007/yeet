@@ -89,6 +89,11 @@ func runEditImpl(args []string) error {
 	}
 
 	if !strings.Contains(original, oldStr) {
+		if editOld != "" {
+			// --old was provided via flag but not found — likely a quoting issue.
+			fmt.Fprintf(os.Stderr, "hint: if your string contains single quotes or special characters, use heredoc mode to avoid shell quoting issues:\n")
+			fmt.Fprintf(os.Stderr, "  cat <<EDIT | yeet edit %s\n  old content\n  |||\n  new content\n  EDIT\n", filename)
+		}
 		return fmt.Errorf("old string not found in %s", filename)
 	}
 
