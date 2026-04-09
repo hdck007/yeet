@@ -39,6 +39,11 @@ var declPatterns = map[Language][]langDeclPattern{
 		{regexp.MustCompile(`^(?:export\s+)?type\s+(\w+)`), "type"},
 		{regexp.MustCompile(`^(?:export\s+)?const\s+(\w+)`), "const"},
 	},
+	LangRuby: {
+		{regexp.MustCompile(`^def\s+((?:self\.)?\w+)`), ""},
+		{regexp.MustCompile(`^class\s+(\w+)`), "class"},
+		{regexp.MustCompile(`^module\s+(\w+)`), "module"},
+	},
 }
 
 func FileSummary(content string, filename string, fileSize int64) string {
@@ -82,7 +87,7 @@ func extractDeclarations(content string, lang Language) []string {
 	var decls []string
 	seen := map[string]bool{}
 
-	for _, line := range lines {
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		for _, p := range patterns {
 			matches := p.re.FindStringSubmatch(trimmed)
@@ -96,6 +101,7 @@ func extractDeclarations(content string, lang Language) []string {
 				if p.label != "" {
 					entry = name + " (" + p.label + ")"
 				}
+				entry += fmt.Sprintf(":%d", i+1)
 				decls = append(decls, entry)
 				break
 			}

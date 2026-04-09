@@ -228,10 +228,10 @@ func runLSImpl(showAll bool, extraFlags, paths []string) error {
 	if isTTY {
 		filtered = entries + summary
 	}
-	improved := printBetter(raw, filtered)
+	printBetter(raw, filtered)
 	rendered := filtered
 
-	if improved && !noAnalytics && db != nil {
+	if !noAnalytics && db != nil {
 		argsSummary := strings.Join(append(extraFlags, paths...), " ")
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "ls",
