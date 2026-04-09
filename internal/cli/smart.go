@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hdck007/yeet/internal/analytics"
@@ -47,6 +48,10 @@ func runSmartImpl(args []string) error {
 	content := string(data)
 	rendered := filter.FileSummary(content, filename, info.Size())
 	improved := printBetter(content, rendered)
+
+	if improved && !strings.Contains(rendered, "(no declarations found)") {
+		fmt.Printf("→ next: yeet read %s --lines N-M  (pick N-M from line numbers above; never read the full file)\n", filename)
+	}
 
 	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{

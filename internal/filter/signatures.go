@@ -14,6 +14,7 @@ const (
 	LangRust       Language = "Rust"
 	LangPython     Language = "Python"
 	LangTypeScript Language = "TypeScript"
+	LangRuby       Language = "Ruby"
 	LangUnknown    Language = "Unknown"
 )
 
@@ -61,7 +62,7 @@ var extToLang = map[string]Language{
 	".c":    LangUnknown,
 	".cpp":  LangUnknown,
 	".h":    LangUnknown,
-	".rb":   LangUnknown,
+	".rb":   LangRuby,
 }
 
 var langPatterns = map[Language][]*regexp.Regexp{
@@ -87,6 +88,7 @@ var langPatterns = map[Language][]*regexp.Regexp{
 		regexp.MustCompile(`^class\s+`),
 		regexp.MustCompile(`^import\s+`),
 		regexp.MustCompile(`^from\s+`),
+		regexp.MustCompile(`^async\s+def\s+`),
 	},
 	LangTypeScript: {
 		regexp.MustCompile(`^export\s+`),
@@ -96,6 +98,14 @@ var langPatterns = map[Language][]*regexp.Regexp{
 		regexp.MustCompile(`^type\s+`),
 		regexp.MustCompile(`^import\s+`),
 		regexp.MustCompile(`^const\s+`),
+		regexp.MustCompile(`^(public|private|protected|static|abstract|async|override|readonly)\s+`),
+		regexp.MustCompile(`^(get|set)\s+\w+\s*\(`),
+	},
+	LangRuby: {
+		regexp.MustCompile(`^def\s+`),
+		regexp.MustCompile(`^class\s+`),
+		regexp.MustCompile(`^module\s+`),
+		regexp.MustCompile(`^attr_`),
 	},
 }
 
@@ -104,6 +114,7 @@ var commentPatterns = map[Language]*regexp.Regexp{
 	LangRust:       regexp.MustCompile(`^\s*//`),
 	LangPython:     regexp.MustCompile(`^\s*#`),
 	LangTypeScript: regexp.MustCompile(`^\s*//`),
+	LangRuby:       regexp.MustCompile(`^\s*#`),
 }
 
 func DetectLanguage(filename string) Language {
@@ -217,4 +228,34 @@ func TailLines(content string, n int) string {
 // ExtractSignatures is the public API kept for backward compat with smart.go.
 func ExtractSignatures(content string, lang Language) (string, bool) {
 	return extractSignatures(content, lang)
+}
+
+// ExtractSignaturesWithLineNums returns the matched signature lines paired with
+// their original 1-based line numbers. Used by the read command to always show
+// line numbers in aggressive mode so callers can follow up with --lines N-M.
+func ExtractSignaturesWithLineNums(content string, lang Language) (nums []int, lines []string, ok bool) {
+	patterns, found := langPatterns[lang]
+	if !found {
+		return nil, nil, false
+	}
+
+	allLines := strings.Split(content, "\n")
+	for i, line := range allLines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		for _, p := range patterns {
+			if p.MatchString(trimmed) {
+				nums = append(nums, i+1)
+				lines = append(lines, line)
+				break
+			}
+		}
+	}
+
+	if len(lines) == 0 {
+		return nil, nil, false
+	}
+	return nums, lines, true
 }

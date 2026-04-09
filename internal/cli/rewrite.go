@@ -3,10 +3,24 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// codeExts are file extensions where yeet smart produces useful declaration+line-number output.
+// For all other extensions (README.md, .yml, .sh, etc.) bare reads pass through unchanged.
+var codeExts = map[string]bool{
+	".go":  true,
+	".rs":  true,
+	".py":  true,
+	".ts":  true,
+	".tsx": true,
+	".js":  true,
+	".jsx": true,
+	".rb":  true,
+}
 
 // rewriteRule maps a raw command prefix to its yeet equivalent.
 type rewriteRule struct {
@@ -56,7 +70,27 @@ func runRewrite(cmd *cobra.Command, args []string) error {
 		os.Exit(exitNoMatch)
 	}
 
-	// Skip commands that already use yeet.
+	// Enforce reading ladder for known code files: bare `yeet read <file>` (no flags) → `yeet read -l aggressive`.
+	// Gives signatures-only output (91% token reduction) in the SAME turn — no extra turn needed.
+	// README, YAML, shell scripts, and other non-code files pass through unchanged.
+	if strings.HasPrefix(raw, "yeet read ") {
+		rest := strings.TrimPrefix(raw, "yeet read ")
+		parts := strings.Fields(rest)
+		hasFlags := false
+		for _, p := range parts[1:] {
+			if strings.HasPrefix(p, "-") {
+				hasFlags = true
+				break
+			}
+		}
+		if !hasFlags && len(parts) == 1 && codeExts[strings.ToLower(filepath.Ext(parts[0]))] {
+			fmt.Print("yeet read " + parts[0] + " -l aggressive")
+			os.Exit(exitRewriteAllow)
+		}
+		os.Exit(exitNoMatch)
+	}
+
+	// Skip other commands that already use yeet.
 	if strings.HasPrefix(raw, "yeet ") {
 		os.Exit(exitNoMatch)
 	}

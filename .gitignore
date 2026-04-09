@@ -17,3 +17,5 @@ vendor/
 .claude/settings.local.json
 .claude/settings.json
 scripts/test-yarn.lock
+scripts/bench_yeet.sh
+scripts/bench-results/
