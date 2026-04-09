@@ -200,6 +200,32 @@ if $DO_CLAUDE; then
     mv "$TMP_MD" "$CLAUDE_MD"
     ok "Prepended @yeet-awareness.md to ~/.claude/CLAUDE.md (top priority)"
   fi
+
+  # ── Auto-allow yeet commands ─────────────────────────────────────────────
+  echo ""
+  echo -e "  ${BOLD}  Auto-allow yeet commands?${RESET}"
+  echo ""
+  echo -e "  When enabled, Claude Code will not ask for permission before running"
+  echo -e "  any ${CYAN}yeet${RESET} command. You can change this later with ${CYAN}yeet auto-allow [true|false]${RESET}."
+  echo ""
+
+  AA_CHOICE=""
+  if [ -t 0 ]; then
+    read -r -p "  Enable auto-allow? [Y/n]: " AA_CHOICE
+  elif [ -e /dev/tty ]; then
+    read -r -p "  Enable auto-allow? [Y/n]: " AA_CHOICE </dev/tty
+  fi
+  AA_CHOICE="${AA_CHOICE:-Y}"
+
+  case "$AA_CHOICE" in
+    [Yy]|[Yy][Ee][Ss]|"")
+      yeet auto-allow true
+      ok "Auto-allow enabled  (yeet auto-allow true)"
+      ;;
+    *)
+      ok "Auto-allow skipped  (run: yeet auto-allow true to enable later)"
+      ;;
+  esac
 fi
 
 # ─── 7. Copilot setup ────────────────────────────────────────────────────────
@@ -265,6 +291,7 @@ echo ""
 
 if $DO_CLAUDE; then
   echo -e "  ${DIM}Claude Code: proxy hook active globally, awareness loaded${RESET}"
+  echo -e "  ${DIM}Auto-allow: $(yeet auto-allow 2>/dev/null || echo "auto-allow: unknown")${RESET}"
   echo -e "  ${DIM}Restart Claude Code to pick up the changes.${RESET}"
 fi
 if $DO_COPILOT; then
