@@ -169,14 +169,6 @@ if $DO_CLAUDE; then
       {
         "matcher": "Grep",
         "hooks": [{ "type": "command", "command": "echo 'BLOCKED: Use \`yeet grep \"<pattern>\" [path]\` instead of the Grep tool.' >&2; exit 2" }]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [{ "type": "command", "command": "echo 'BLOCKED: Pipe content to \`yeet write <file>\` instead of the Write tool.' >&2; exit 2" }]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [{ "type": "command", "command": "echo 'BLOCKED: Use \`yeet edit <file> --old \"...\" --new \"...\"\` instead of the Edit tool.' >&2; exit 2" }]
       }
     ]
   }
@@ -187,7 +179,7 @@ ENDJSON
 
   echo ""
   echo -e "  ${DIM}Claude Code is now configured to:${RESET}"
-  echo -e "  ${DIM}  • Block Read/Glob/Grep/Write/Edit tools (force yeet)${RESET}"
+  echo -e "  ${DIM}  • Block Read/Glob/Grep tools (force yeet)${RESET}"
 fi
 
 # ─── 3. Copilot integration ───────────────────────────────────────────────────
@@ -296,8 +288,6 @@ if $DO_PLUGIN; then
           {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
           {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
           {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-          {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet write <file> --b64 <base64>` instead of the Write tool.'\'' >&2; exit 2"}]},
-          {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
           {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
         ]
       }
@@ -336,8 +326,6 @@ if $DO_PLUGIN; then
           {"matcher": "Read",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
           {"matcher": "Glob",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
           {"matcher": "Grep",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-          {"matcher": "Write", "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet write <file> --b64 <base64>` instead of the Write tool.'\'' >&2; exit 2"}]},
-          {"matcher": "Edit",  "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
           {"matcher": "Bash",  "hooks": [{"type": "command", "command": $cmd}]}
         ] + .hooks.PreToolUse
       )

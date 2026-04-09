@@ -136,13 +136,10 @@ if $DO_CLAUDE; then
   HOOK_CMD="bash \"$HOOKS_DIR/yeet-proxy.sh\""
   TMP_SETTINGS="$(mktemp)"
 
-  WRITE_CMD='echo "BLOCKED: Use `cat <<'"'"'EOF'"'"' | yeet write <file>` instead of the Write tool." >&2; exit 2'
-  YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" --arg write_cmd "$WRITE_CMD" '[
+    YEET_HOOKS=$(jq -n --arg cmd "$HOOK_CMD" '[
     {"matcher": "Read",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet read <file>` or `yeet smart <file>` instead of the Read tool.'\'' >&2; exit 2"}]},
     {"matcher": "Glob",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool.'\'' >&2; exit 2"}]},
     {"matcher": "Grep",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool.'\'' >&2; exit 2"}]},
-    {"matcher": "Write", "_yeet": true, "hooks": [{"type": "command", "command": $write_cmd}]},
-    {"matcher": "Edit",  "_yeet": true, "hooks": [{"type": "command", "command": "echo '\''BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool.'\'' >&2; exit 2"}]},
     {"matcher": "Bash",  "_yeet": true, "hooks": [{"type": "command", "command": $cmd}]}
   ]')
 

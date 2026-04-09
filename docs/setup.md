@@ -46,7 +46,7 @@ Yeet hooks into Claude Code via two config files in `.claude/`:
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | Tells Claude to always prefer `yeet` commands over built-in tools |
-| `.claude/settings.local.json` | `PreToolUse` hooks that block Read/Glob/Grep/Write/Edit tools + `PostToolUse` failure coach |
+| `.claude/settings.local.json` | `PreToolUse` hooks that block Read/Glob/Grep tools + `PostToolUse` failure coach |
 | `.claude/hooks/yeet-failure.sh` | Coaches Claude to fix `yeet` source when a command fails |
 
 ### Automatic setup
@@ -76,7 +76,7 @@ Then create `.claude/settings.local.json` in your project — see the reference 
 Open Claude Code in your project. Claude should now:
 
 - Use `yeet read`, `yeet grep`, `yeet glob`, etc. automatically
-- Be blocked (exit 2) if it tries to use the built-in Read / Grep / Glob / Write / Edit tools directly
+- Be blocked (exit 2) if it tries to use the built-in Read / Grep / Glob tools directly
 - Receive coaching when a `yeet` command exits non-zero
 
 Check analytics after a few operations:
@@ -179,10 +179,8 @@ bash scripts/install.sh --target /path/to/your/project
 | `cat <file>` / `Read` tool | `yeet read <file>` |
 | `Read` tool (signatures only) | `yeet read <file> -l aggressive` |
 | Quick file summary | `yeet smart <file>` |
-| `Edit` tool | `yeet edit <file> --old "..." --new "..."` |
 | `find` / `Glob` tool | `yeet glob "<pattern>" [path]` |
 | `grep` / `Grep` tool | `yeet grep "<pattern>" [path]` |
-| `Write` tool / `cat > file` | `cat <<'EOF' \| yeet write <file>` |
 | `ls -laR` | `yeet ls [path]` |
 | `find -name` | `yeet find "<pattern>" [path]` |
 | `diff` | `yeet diff <file1> <file2>` |
