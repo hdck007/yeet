@@ -6,7 +6,7 @@
 
 | NEVER use | ALWAYS use instead |
 |---|---|
-| Read / Glob / Grep / Edit / Write tools | equivalent `yeet` command |
+| Read / Glob / Grep tools | equivalent `yeet` command |
 | `cat` / `head` / `tail` | `yeet read <file>` |
 | `ls` / `find` / `grep -rn` | `yeet ls` / `yeet find` / `yeet grep` |
 
@@ -18,7 +18,7 @@
 4. **`yeet read <file> -l minimal`** — LAST RESORT only if absolutely necessary.
 
 > **Rule:** grep → `--lines` if you need more → `-l aggressive` for shape.
-> **After `yeet edit` or `yeet write`: trust the confirmation — do NOT re-read to verify.**
+
 > Bare `yeet read` on files >150 lines warns and stops — follow the decision flow above.
 
 ## Reference
@@ -41,12 +41,6 @@ yeet read <file> -l aggressive      # signatures only — always includes line n
 yeet read <file> -l minimal         # full content minus comments/blanks (last resort)
 yeet read <file> -n                 # full content with line numbers
 
-# Edit & write
-yeet edit <file> --old 'old' --new 'new'        # replace first match
-yeet edit <file> --old 'old' --new 'new' --all  # replace all
-cat <<'WRITE' | yeet write path/to/file         # write/overwrite file
-content here
-WRITE
 ```
 
 > In compound commands use `yeet` explicitly in every segment:

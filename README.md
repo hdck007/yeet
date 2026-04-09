@@ -133,7 +133,7 @@ bash scripts/install.sh --plugin --global
 
 | Component | Flag | What it does |
 |-----------|------|--------------|
-| PreToolUse blockers | `--claude` | Blocks native Read/Glob/Grep/Write/Edit tools |
+| PreToolUse blockers | `--claude` | Blocks native Read/Glob/Grep tools |
 | `yeet-proxy.sh` | `--plugin` | Rewrites `cat`/`grep` Bash calls to `yeet` before execution |
 
 After setup:
@@ -142,8 +142,6 @@ After setup:
 Native Read tool      →  BLOCKED
 Native Grep tool      →  BLOCKED
 Native Glob tool      →  BLOCKED
-Native Write tool     →  BLOCKED
-Native Edit tool      →  BLOCKED
 Bash: cat file.go     →  yeet read file.go    (rewritten silently)
 Bash: grep foo .      →  yeet grep foo .      (rewritten silently)
 ```
