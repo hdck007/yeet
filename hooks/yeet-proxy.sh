@@ -37,22 +37,23 @@ if [ -z "$CMD" ]; then
   exit 0
 fi
 
-# Skip heredocs early
+# Auto-allow commands that use yeet — must run before the heredoc bail so that
+# pipe-to-yeet forms like `cat <<'X' | yeet edit file` are also covered.
+_YEET_AA_FILE="${HOME}/.local/share/yeet/auto-allow"
+_is_yeet_cmd=false
+case "$CMD" in
+  yeet | yeet\ *)           _is_yeet_cmd=true ;;  # direct:  yeet edit ...
+  *"| yeet "* | *"| yeet") _is_yeet_cmd=true ;;  # piped:   cat ... | yeet edit ...
+esac
+if $_is_yeet_cmd && [ "$(cat "$_YEET_AA_FILE" 2>/dev/null | tr -d '[:space:]')" = "true" ]; then
+  _audit_log "auto-allow:yeet" "$CMD"
+  jq -n '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"yeet auto-allow"}}'
+  exit 0
+fi
+
+# Skip heredocs — they cannot be safely rewritten (checked after yeet auto-allow above).
 case "$CMD" in
   *'<<'*) _audit_log "skip:heredoc" "$CMD"; exit 0 ;;
-esac
-
-# Auto-allow commands that already use yeet (when auto-allow is enabled).
-# Reading the file directly avoids spawning a subprocess on every hook call.
-_YEET_AA_FILE="${HOME}/.local/share/yeet/auto-allow"
-case "$CMD" in
-  yeet | yeet\ *)
-    if [ "$(cat "$_YEET_AA_FILE" 2>/dev/null | tr -d "[:space:]")" = "true" ]; then
-      _audit_log "auto-allow:yeet" "$CMD"
-      jq -n '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","permissionDecisionReason":"yeet auto-allow"}}'
-      exit 0
-    fi
-    ;;
 esac
 
 # Delegate all rewrite logic to the yeet binary.
