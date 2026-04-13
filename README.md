@@ -71,20 +71,6 @@ src/
 curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
 ```
 
-### Uninstall
-```bash
-curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/uninstall.sh | bash
-```
-
-The uninstaller checks what's installed, shows you exactly what will be removed, and asks for confirmation before touching anything.
-
-### Manual
-**Prerequisites:** Go 1.21+, a C compiler (for SQLite)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
-```
-
 That's it. The installer will:
 - Download the pre-built binary to `/usr/local/bin/yeet`
 - Install `jq` if missing
@@ -95,6 +81,14 @@ That's it. The installer will:
 yeet version
 yeet stats
 ```
+
+### Uninstall
+```bash
+curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/uninstall.sh | bash
+```
+
+The uninstaller checks what's installed, shows you exactly what will be removed, and asks for confirmation before touching anything.
+
 
 ### Build from source
 
