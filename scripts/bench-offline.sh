@@ -237,6 +237,21 @@ run_case "repo layout"                "find . -type f -not -path './.git/*'" "ye
 run_case "line counts"                "wc -l \$(find . -name '*.md')"    "yeet wc \$(find . -name '*.md')"
 run_case "compare two files"          "diff $SRC_FILE $MD_FILE"          "yeet diff $SRC_FILE $MD_FILE"
 
+# git — the largest outputs an agent reads. Only meaningful in a git repo.
+if [ -d "$TARGET/.git" ]; then
+  run_case "git status"               "git status"                       ""
+  run_case "git diff (last commit)"   "git diff HEAD~1"                  ""
+  run_case "git log -20"              "git log -20"                      ""
+  run_case "git show HEAD"            "git show HEAD"                    ""
+  run_case "git branch"               "git branch"                       ""
+fi
+
+# gh — skipped unless the CLI is installed and authenticated.
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  run_case "gh pr list"               "gh pr list"                       ""
+  run_case "gh run list"              "gh run list -L 10"                ""
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 NATIVE_TOK="$(est_tokens "$TOTAL_NATIVE")"
 YEET_TOK="$(est_tokens "$TOTAL_YEET")"

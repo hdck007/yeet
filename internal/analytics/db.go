@@ -100,6 +100,45 @@ func migrate(conn *sql.DB) error {
 
 	CREATE INDEX IF NOT EXISTS idx_failures_created ON command_failures(created_at);
 	`
-	_, err := conn.Exec(schema)
-	return err
+	if _, err := conn.Exec(schema); err != nil {
+		return err
+	}
+
+	// Added later: the audit trail. Without these, a row records a saving but
+	// not what it was measured against, so the number cannot be checked.
+	//   baseline_cmd  — the native command the saving is measured against
+	//   yeet_cmd      — the yeet command that actually ran
+	//   baseline_kind — how the baseline was obtained (see analytics.Baseline*)
+	//   chars_printed — what yeet actually wrote to stdout, which is not
+	//                   chars_rendered whenever the raw-output fallback fired
+	for _, col := range []struct{ name, decl string }{
+		{"baseline_cmd", "TEXT NOT NULL DEFAULT ''"},
+		{"yeet_cmd", "TEXT NOT NULL DEFAULT ''"},
+		{"baseline_kind", "TEXT NOT NULL DEFAULT ''"},
+		{"chars_printed", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := addColumnIfMissing(conn, "command_usages", col.name, col.decl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addColumnIfMissing is an idempotent ALTER TABLE — SQLite has no
+// "ADD COLUMN IF NOT EXISTS", and databases from earlier versions are already
+// out in the wild.
+func addColumnIfMissing(conn *sql.DB, table, column, decl string) error {
+	rows, err := conn.Query("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", table, column)
+	if err != nil {
+		return fmt.Errorf("inspect %s.%s: %w", table, column, err)
+	}
+	present := rows.Next()
+	rows.Close()
+	if present {
+		return nil
+	}
+	if _, err := conn.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl); err != nil {
+		return fmt.Errorf("add %s.%s: %w", table, column, err)
+	}
+	return nil
 }

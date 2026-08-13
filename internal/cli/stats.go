@@ -13,6 +13,8 @@ import (
 var (
 	statsJSON  bool
 	statsReset bool
+	statsAudit bool
+	statsLimit int
 )
 
 var statsCmd = &cobra.Command{
@@ -24,6 +26,8 @@ var statsCmd = &cobra.Command{
 func init() {
 	statsCmd.Flags().BoolVar(&statsJSON, "json", false, "Output as JSON")
 	statsCmd.Flags().BoolVar(&statsReset, "reset", false, "Clear all analytics data")
+	statsCmd.Flags().BoolVar(&statsAudit, "audit", false, "Show the exact baseline each saving was measured against")
+	statsCmd.Flags().IntVar(&statsLimit, "limit", 25, "Rows to show with --audit")
 	rootCmd.AddCommand(statsCmd)
 }
 
@@ -40,6 +44,10 @@ func runStats(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println("Analytics data cleared.")
 		return nil
+	}
+
+	if statsAudit {
+		return printAudit(statsDB)
 	}
 
 	stats, err := statsDB.GetAllStats()
@@ -120,4 +128,65 @@ func formatNumber(n int) string {
 		result = append(result, byte(c))
 	}
 	return string(result)
+}
+
+// printAudit shows where the numbers come from. A savings figure is only worth
+// as much as the baseline it was measured against, so each row names that
+// baseline command and how it was obtained.
+func printAudit(statsDB *analytics.DB) error {
+	kinds, err := statsDB.CountByBaselineKind()
+	if err != nil {
+		return fmt.Errorf("count baselines: %w", err)
+	}
+	rows, err := statsDB.GetAuditRows(statsLimit)
+	if err != nil {
+		return fmt.Errorf("query audit rows: %w", err)
+	}
+	if len(rows) == 0 {
+		fmt.Println("No analytics data yet. Run some yeet commands first!")
+		return nil
+	}
+
+	total := 0
+	for _, n := range kinds {
+		total += n
+	}
+	fmt.Printf("%d recorded invocations\n", total)
+	fmt.Printf("  %-11s %d   measured against the command you actually ran (counted in totals)\n",
+		analytics.BaselineAsInvoked, kinds[analytics.BaselineAsInvoked])
+	if n := kinds[analytics.BaselineDirect]; n > 0 {
+		fmt.Printf("  %-11s %d   no native command involved; baseline is the full content\n",
+			analytics.BaselineDirect, n)
+	}
+	if n := kinds[analytics.BaselineSynthetic]; n > 0 {
+		fmt.Printf("  %-11s %d   yeet had to run a larger form of the command — NOT counted in totals\n",
+			analytics.BaselineSynthetic, n)
+	}
+	if n := kinds["unlabelled"]; n > 0 {
+		fmt.Printf("  %-11s %d   recorded before baselines were tracked — NOT counted in totals\n",
+			"unlabelled", n)
+	}
+
+	fmt.Println()
+	fmt.Printf("%-6s %-11s %9s %9s %7s  %s\n", "cmd", "baseline", "baseline", "printed", "saved", "baseline command")
+	fmt.Println(strings.Repeat("─", 100))
+	for _, r := range rows {
+		pct := 0.0
+		if r.CharsRaw > 0 {
+			pct = float64(r.CharsSaved) / float64(r.CharsRaw) * 100
+		}
+		bc := r.BaselineCmd
+		if bc == "" {
+			bc = "(not recorded)"
+		}
+		if len(bc) > 46 {
+			bc = bc[:43] + "..."
+		}
+		fmt.Printf("%-6s %-11s %9s %9s %6.1f%%  %s\n",
+			r.Command, r.BaselineKind,
+			formatNumber(r.CharsRaw), formatNumber(r.CharsPrinted), pct, bc)
+	}
+	fmt.Println()
+	fmt.Println("Re-run any baseline command above and compare it with the yeet form to check a row.")
+	return nil
 }
