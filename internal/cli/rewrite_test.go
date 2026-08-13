@@ -260,3 +260,30 @@ func TestSplitArgs_KeepsQuotedRunsTogether(t *testing.T) {
 		}
 	}
 }
+
+// Regression: `git branch -d foo` deletes a branch but was being rewritten
+// because the guard only looked at the subcommand name. Execution was still
+// correct — it fell through to real git — but the invariant is that a
+// state-changing command is never rewritten at all.
+func TestSafeToRewrite_BranchStashWorktreeArgs(t *testing.T) {
+	safe := []string{
+		"git branch", "git branch -a", "git branch --all", "git branch -r", "git branch -v",
+		"git stash list", "git stash show", "git worktree list",
+	}
+	for _, c := range safe {
+		if !safeToRewrite(c) {
+			t.Errorf("safeToRewrite(%q) = false, want true", c)
+		}
+	}
+	unsafe := []string{
+		"git branch -d foo", "git branch -D foo", "git branch -m old new",
+		"git branch -c a b", "git branch newbranch", "git branch --set-upstream-to=x",
+		"git stash", "git stash pop", "git stash apply", "git stash drop", "git stash push -m x",
+		"git worktree add ../wt", "git worktree remove ../wt", "git worktree prune",
+	}
+	for _, c := range unsafe {
+		if safeToRewrite(c) {
+			t.Errorf("safeToRewrite(%q) = true, want false — this changes state", c)
+		}
+	}
+}

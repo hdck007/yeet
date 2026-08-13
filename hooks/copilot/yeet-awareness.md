@@ -33,7 +33,9 @@ yeet git diff [ref]             # per-file +/- summary, largest changes first
 yeet git log -20                # one line per commit
 yeet git show <ref>             # commit header + per-file +/-
 yeet git branch                 # branch names with relative dates
-yeet git stash list
+yeet git stash list / show
+yeet git worktree list
+yeet git push / pull / fetch    # collapsed to "ok <what happened>"
 
 yeet gh pr list                 # number, title, author, review state
 yeet gh pr view <n>             # state, branches, file/line counts, URL
@@ -41,6 +43,7 @@ yeet gh pr checks <n>           # pass/fail counts; only failures listed
 yeet gh issue list / view <n>
 yeet gh run list                # id, conclusion, workflow, branch
 yeet gh run view <id>           # per-job status; only failing steps listed
+yeet gh repo view / list
 ```
 
 **Read-only subcommands only.** Anything that changes state — `git commit`,
@@ -48,8 +51,14 @@ yeet gh run view <id>           # per-job status; only failing steps listed
 real binary. The proxy hook already refuses to rewrite those; do not route them
 through yeet by hand.
 
-When you need the actual hunks after seeing a `yeet git diff` summary, read the
-specific files it named rather than asking for the whole diff.
+`yeet git diff` reports *where* things changed, not what. When you need the
+actual lines, either read the specific files it named, or use
+`yeet git diff --content`, which keeps the changed lines with the index/mode/@@
+noise stripped and caps the output (40 lines per file, 400 overall).
+
+`git -C <path>`, `--no-pager`, `-c key=val`, `--git-dir`, and the other git
+global options are understood and passed through, so those forms stay compact
+too.
 
 ## Reference
 
