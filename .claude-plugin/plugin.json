@@ -1,6 +1,7 @@
 {
   "name": "yeet-integration",
-  "description": "Seamlessly rewrites standard bash commands to use optimized Yeet commands",
-  "version": "1.1.0",
-  "author": { "name": "Yeet Developer" }
+  "description": "Token-optimized CLI wrapper for coding agents: rewrites bash commands to compact yeet equivalents, with install/uninstall/benchmark skills",
+  "version": "1.2.0",
+  "author": { "name": "Yeet Developer" },
+  "skills": ["./skills/yeet-install", "./skills/yeet-uninstall", "./skills/yeet-benchmark"]
 }

@@ -66,29 +66,59 @@ src/
 
 ## 📦 Install
 
-### Quick install script
-```
-curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
+```bash
+curl -fsSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash
 ```
 
-That's it. The installer will:
-- Download the pre-built binary to `/usr/local/bin/yeet`
-- Install `jq` if missing
-- Set up the Claude Code proxy hook globally (`~/.claude/`)
+It asks which editor integration you want (Claude Code is the default) and whether to
+enable auto-allow. To skip the questions:
 
-**Verify:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/hdck007/yeet/main/install.sh | bash -s -- --yes
+```
+
+The installer downloads the binary to `/usr/local/bin` (falling back to `~/.local/bin`),
+installs `jq` if it is missing, sets up the Claude Code hooks in `~/.claude/`, and
+verifies every piece before it exits. Then restart Claude Code and check:
+
 ```bash
 yeet version
 yeet stats
 ```
 
+**Useful flags** — `--dry-run` prints every change without making it, `--claude` /
+`--copilot` / `--both` / `--binary-only` pick the integration, `--no-auto-allow` keeps
+Claude Code's permission prompts, `--dir` changes where the binary goes, `--version`
+pins a release, `--from-source` builds with Go. `install.sh --help` lists them all.
+
+Re-running the installer is safe: it strips its previous hook entries before writing
+new ones, so hooks never stack up. It records everything it touched in
+`~/.local/share/yeet/install-manifest.json`, and if any step fails it rolls back rather
+than leaving you half-installed.
+
 ### Uninstall
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/hdck007/yeet/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hdck007/yeet/main/uninstall.sh | bash
 ```
 
-The uninstaller checks what's installed, shows you exactly what will be removed, and asks for confirmation before touching anything.
+It lists what it found, asks before touching anything, then removes the binary
+(searching every location it could be in, not just `/usr/local/bin`), the hooks, the
+awareness file, the `CLAUDE.md` reference, and the analytics database. Settings you
+had before yeet — including your original `autoCompactThreshold` — are restored, and
+unrelated hooks and permissions are left alone. Installs from older versions that left
+no manifest are found and removed too.
 
+It verifies the result and **exits non-zero if anything survives**, so a clean exit is
+a real guarantee.
+
+```bash
+bash uninstall.sh --dry-run      # show what would go, change nothing
+bash uninstall.sh --keep-data    # keep your yeet stats history
+bash uninstall.sh --purge        # also clean project files (.github/hooks, .vscode)
+```
+
+Restart Claude Code afterwards — a running session keeps the old hooks in memory.
 
 ### Build from source
 
@@ -100,6 +130,36 @@ git clone https://github.com/hdck007/yeet.git
 cd yeet
 make install
 ```
+
+---
+
+## 📊 How much does it save?
+
+Two benchmarks ship with the repo.
+
+**Deterministic, free, reproducible** — runs each native command, asks `yeet rewrite`
+what the hook would turn it into, and compares output sizes:
+
+```bash
+bash scripts/bench-offline.sh                     # against this repo
+bash scripts/bench-offline.sh --target ~/my-app   # against your project
+```
+
+It reports per-case numbers, the totals, and — importantly — any rewrite that produced
+a *failing* command, which are excluded from the totals rather than counted as savings.
+
+**End-to-end on a real task** — runs the same task in Claude Code with and without
+yeet and compares the tokens the API actually billed:
+
+```bash
+bash scripts/bench-live.sh --reps 3
+```
+
+Your `~/.claude` is never touched: each arm gets its own throwaway `CLAUDE_CONFIG_DIR`,
+and the yeet arm is built by running `install.sh` against it. Runs alternate between
+arms so cache warmth is shared, and any run that used yeet in the native arm, skipped
+yeet in the yeet arm, or failed to finish the task is reported and excluded. Costs real
+money — it asks first.
 
 ---
 
