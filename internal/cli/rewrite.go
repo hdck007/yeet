@@ -39,6 +39,60 @@ var rules = []rewriteRule{
 	{prefix: "ls\n", yeetPrefix: "yeet ls"},
 	{prefix: "find ", yeetPrefix: "yeet find "},
 	{prefix: "diff ", yeetPrefix: "yeet diff "},
+
+	// git and gh are among the noisiest commands an agent runs. Only the
+	// read-only subcommands are rewritten — see gitReadOnly / ghReadOnly below;
+	// anything that mutates state must reach the real binary untouched.
+	{prefix: "git ", yeetPrefix: "yeet git "},
+	{prefix: "gh ", yeetPrefix: "yeet gh "},
+}
+
+// gitReadOnly lists the git subcommands that are safe to rewrite. A rewrite of
+// commit, push, rebase, or reset would route a state-changing command through
+// yeet, so those are deliberately absent and pass through untouched.
+var gitReadOnly = map[string]bool{
+	"status": true,
+	"diff":   true,
+	"log":    true,
+	"show":   true,
+	"branch": true,
+	"stash":  true, // only `stash list` is rendered; other forms pass through
+}
+
+// ghReadOnly lists the gh subcommand pairs that are safe to rewrite, keyed
+// "<group> <sub>". Creating, merging, closing, or editing must never be
+// rewritten.
+var ghReadOnly = map[string]bool{
+	"pr list":    true,
+	"pr view":    true,
+	"pr checks":  true,
+	"issue list": true,
+	"issue view": true,
+	"run list":   true,
+	"run view":   true,
+}
+
+// safeToRewrite guards the git/gh families. Returns false for anything not
+// explicitly known to be read-only.
+func safeToRewrite(cmd string) bool {
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 {
+		return false
+	}
+	switch fields[0] {
+	case "git":
+		// `git stash` with no args stashes changes — only `stash list` is safe.
+		if fields[1] == "stash" {
+			return len(fields) >= 3 && fields[2] == "list"
+		}
+		return gitReadOnly[fields[1]]
+	case "gh":
+		if len(fields) < 3 {
+			return false
+		}
+		return ghReadOnly[fields[1]+" "+fields[2]]
+	}
+	return true
 }
 
 // Exit codes consumed by the shell hook (mirrors rtk's protocol).
@@ -101,7 +155,30 @@ func runRewrite(cmd *cobra.Command, args []string) error {
 
 	for _, rule := range rules {
 		if strings.HasPrefix(stripped, rule.prefix) {
+			// git/gh: never rewrite a subcommand that changes state.
+			if (rule.prefix == "git " || rule.prefix == "gh ") && !safeToRewrite(stripped) {
+				os.Exit(exitNoMatch)
+			}
 			rest := stripped[len(rule.prefix):]
+
+			// Translate the arguments where the yeet command's shape differs
+			// from the native one. Emitting a command that fails is worse than
+			// not rewriting at all: the agent spends a turn on the error and
+			// then retries, so a rule that cannot produce a valid command must
+			// pass through instead.
+			ok := true
+			switch rule.prefix {
+			case "cat ":
+				rest, ok = translateCatArgs(rest)
+			case "grep ":
+				rest, ok = translateGrepArgs(rest)
+			case "find ":
+				rest, ok = translateFindArgs(rest)
+			}
+			if !ok {
+				os.Exit(exitNoMatch)
+			}
+
 			rewritten := envPrefix + rule.yeetPrefix + rest
 			fmt.Print(rewritten)
 			os.Exit(exitRewriteAllow)
@@ -132,4 +209,164 @@ func stripEnvPrefix(cmd string) (stripped string, prefix string) {
 	prefix = strings.Join(parts[:i], " ") + " "
 	stripped = strings.Join(parts[i:], " ")
 	return stripped, prefix
+}
+
+// ─── Argument translation ─────────────────────────────────────────────────────
+// `yeet <cmd>` does not always take the same arguments as the native command it
+// replaces. Where the shapes differ, translate; where a valid yeet command
+// cannot be produced, return ok=false so the caller passes the command through
+// untouched.
+
+// translateCatArgs handles `cat`. `yeet read` takes exactly one file, so a
+// multi-file cat cannot be expressed and is passed through.
+func translateCatArgs(rest string) (string, bool) {
+	fields := splitArgs(rest)
+	files := 0
+	for _, f := range fields {
+		if !strings.HasPrefix(f, "-") {
+			files++
+		}
+	}
+	if files != 1 {
+		return rest, false
+	}
+	return rest, true
+}
+
+// translateGrepArgs handles `grep`. `yeet grep` is always recursive and always
+// prints line numbers, so -r/-R/--recursive and -n/--line-number are implied;
+// passing them through makes yeet's flag parser reject the command. Flags yeet
+// does not understand mean the command is passed through instead.
+func translateGrepArgs(rest string) (string, bool) {
+	fields := splitArgs(rest)
+	var out []string
+	for _, f := range fields {
+		switch f {
+		case "-r", "-R", "--recursive", "-n", "--line-number":
+			continue // implied by yeet grep
+		case "-rn", "-nr", "-rln", "-Rn", "-nR":
+			continue // common clusters of the same two flags
+		}
+		// An unrecognised flag would be forwarded and rejected. Only let
+		// through the ones yeet grep actually accepts.
+		if strings.HasPrefix(f, "-") && !grepFlagOK(f) {
+			return rest, false
+		}
+		out = append(out, shellQuote(f))
+	}
+	if len(out) == 0 {
+		return rest, false
+	}
+	return strings.Join(out, " "), true
+}
+
+// grepFlagOK reports whether yeet grep accepts a flag it would be handed.
+func grepFlagOK(f string) bool {
+	base := f
+	if i := strings.IndexByte(base, '='); i >= 0 {
+		base = base[:i]
+	}
+	switch base {
+	case "-C", "--context", "--trim", "--type", "-v", "--verbose",
+		"--max-results", "--max-line-len", "--max-per-file",
+		"-i", "--ignore-case": // -i is understood by the underlying search
+		return true
+	}
+	return false
+}
+
+// translateFindArgs handles `find`. Native form is `find <path> -name <pattern>`
+// while yeet's is `yeet find <pattern> [path]`, so the two have to be swapped.
+// Any other predicate (-type, -mtime, -exec, ...) has no yeet equivalent and is
+// passed through.
+func translateFindArgs(rest string) (string, bool) {
+	fields := splitArgs(rest)
+	var path, pattern string
+	for i := 0; i < len(fields); i++ {
+		switch fields[i] {
+		case "-name", "-iname":
+			if i+1 >= len(fields) {
+				return rest, false
+			}
+			if pattern != "" {
+				return rest, false // more than one pattern: not expressible
+			}
+			pattern = fields[i+1]
+			i++
+		default:
+			if strings.HasPrefix(fields[i], "-") {
+				return rest, false // an unsupported predicate
+			}
+			if path != "" {
+				return rest, false // more than one search root
+			}
+			path = fields[i]
+		}
+	}
+	if pattern == "" {
+		return rest, false
+	}
+	if path == "" {
+		return shellQuote(pattern), true
+	}
+	return shellQuote(pattern) + " " + shellQuote(path), true
+}
+
+// splitArgs splits a command tail on whitespace while keeping quoted runs
+// together, so a quoted pattern with spaces stays one argument.
+func splitArgs(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == ' ' || r == '\t' || r == '\n':
+			if cur.Len() > 0 {
+				out = append(out, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
+// shellQuote makes an argument survive re-parsing by the shell. Reassembling a
+// command means the shell sees the result again: an unquoted glob such as *.md
+// would be expanded before yeet ever runs, and a pattern with a trailing space
+// would silently lose it.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	safe := true
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '_', '-', '.', '/', '=', ':', '@', '+', ',':
+			continue
+		}
+		safe = false
+		break
+	}
+	if safe {
+		return s
+	}
+	// Single quotes protect everything except a single quote itself, which is
+	// closed, escaped, and reopened.
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

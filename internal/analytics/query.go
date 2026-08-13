@@ -1,12 +1,12 @@
 package analytics
 
 type CommandStats struct {
-	CommandName    string
-	TotalRuns      int
-	CharsRaw       int
-	CharsRendered  int
-	CharsSaved     int
-	TokensSaved    int
+	CommandName   string
+	TotalRuns     int
+	CharsRaw      int
+	CharsRendered int
+	CharsSaved    int
+	TokensSaved   int
 }
 
 type CommandUsages struct {
@@ -98,4 +98,73 @@ func (d *DB) GetFailures(limit int) ([]FailureRow, error) {
 func (d *DB) ClearFailures() error {
 	_, err := d.conn.Exec("DELETE FROM command_failures;")
 	return err
+}
+
+// AuditRow is one recorded invocation with everything needed to re-run the
+// comparison by hand. Nothing here is derived or estimated at read time.
+type AuditRow struct {
+	Command      string
+	BaselineCmd  string
+	YeetCmd      string
+	BaselineKind string
+	CharsRaw     int
+	CharsPrinted int
+	CharsSaved   int
+	CreatedAt    string
+}
+
+// GetAuditRows returns the most recent invocations, newest first. This is the
+// answer to "where does that savings number come from" — every row names the
+// exact baseline command it was measured against and how that baseline was
+// obtained, so any figure can be checked rather than trusted.
+func (d *DB) GetAuditRows(limit int) ([]AuditRow, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	rows, err := d.conn.Query(`
+		SELECT p.command_name, u.baseline_cmd, u.yeet_cmd, u.baseline_kind,
+		       u.chars_raw, u.chars_printed, u.chars_delta, u.created_at
+		FROM command_usages u
+		JOIN command_parents p ON p.id = u.command_parent_id
+		ORDER BY u.id DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AuditRow
+	for rows.Next() {
+		var r AuditRow
+		if err := rows.Scan(&r.Command, &r.BaselineCmd, &r.YeetCmd, &r.BaselineKind,
+			&r.CharsRaw, &r.CharsPrinted, &r.CharsSaved, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// CountByBaselineKind reports how many stored rows fall into each baseline
+// kind, so the share of the data that is trustworthy is visible rather than
+// implied.
+func (d *DB) CountByBaselineKind() (map[string]int, error) {
+	rows, err := d.conn.Query(`
+		SELECT CASE WHEN baseline_kind = '' THEN 'unlabelled' ELSE baseline_kind END AS k,
+		       COUNT(*)
+		FROM command_usages GROUP BY k`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			return nil, err
+		}
+		out[k] = n
+	}
+	return out, rows.Err()
 }

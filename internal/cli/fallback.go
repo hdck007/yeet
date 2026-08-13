@@ -61,14 +61,42 @@ func runWithFallback(subcmd string, cmdArgs []string, fn func() error, fb Fallba
 	return nil
 }
 
+// stripYeetFlags removes yeet's own persistent flags from an argument list.
+// Commands that set DisableFlagParsing receive them verbatim, and forwarding
+// something like --no-analytics to git or gh makes the underlying binary reject
+// the whole command. Cobra never parses them in that mode either, so the flags
+// are also applied here.
+func stripYeetFlags(args []string) []string {
+	clean := make([]string, 0, len(args))
+	for _, a := range args {
+		switch a {
+		case "--no-analytics":
+			noAnalytics = true
+		case "--raw":
+			rawOutput = true
+		default:
+			clean = append(clean, a)
+		}
+	}
+	return clean
+}
+
 // printBetter prints filtered if it's shorter than raw; otherwise prints raw.
 // Returns true if filtered was shorter (gain), false if raw was printed (loss).
-// Analytics are always recorded by callers regardless of the result.
 func printBetter(raw, filtered string) bool {
+	_, shorter := printBetterN(raw, filtered)
+	return shorter
+}
+
+// printBetterN is printBetter but reports how many bytes actually reached
+// stdout. Callers must record that number rather than the length of the
+// filtered string: when the fallback fires, the model received the raw output,
+// and logging the filtered length would book a saving that never happened.
+func printBetterN(raw, filtered string) (printed int, shorter bool) {
 	if len(filtered) < len(raw) {
 		fmt.Print(filtered)
-		return true
+		return len(filtered), true
 	}
 	fmt.Print(raw)
-	return false
+	return len(raw), false
 }

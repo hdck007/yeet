@@ -82,7 +82,13 @@ func runGrep(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "yeet grep: context mode error: %v\n", err)
 		} else {
 			fmt.Print(rendered)
-			trackAnalytics(start, args, raw, rendered, 0)
+			// Context mode parses `rg --json`, whose output is several times
+			// larger than the plain-text search a caller would have run. Measuring
+			// against it would overstate the saving, so this row is labelled
+			// synthetic and left out of the headline totals.
+			grepBaselineCmd = "rg --json -n -C " + strconv.Itoa(grepContextLines) + " " + rgPattern + " " + searchPath
+			grepBaselineKind = analytics.BaselineSynthetic
+			trackAnalytics(start, args, raw, rendered, len(rendered), 0)
 			return nil
 		}
 	}
@@ -103,11 +109,19 @@ func runGrep(cmd *cobra.Command, args []string) error {
 		}
 		rgArgs = append(rgArgs, rgPattern, searchPath)
 		result = yeetexec.Run(ctx, "rg", rgArgs...)
+		grepBaselineCmd = "rg " + strings.Join(rgArgs, " ")
 	} else {
-		grepArgs := []string{"-rn", "--color=never"}
+		// -r only when the target is a directory. Forcing a recursive search
+		// for a single-file request would measure the saving against a whole
+		// tree the caller never asked to search, which inflates it.
+		grepArgs := []string{"-n", "--color=never"}
+		if fi, err := os.Stat(searchPath); err == nil && fi.IsDir() {
+			grepArgs = append(grepArgs, "-r")
+		}
 		grepArgs = append(grepArgs, extraArgs...)
 		grepArgs = append(grepArgs, pattern, searchPath)
 		result = yeetexec.Run(ctx, "grep", grepArgs...)
+		grepBaselineCmd = "grep " + strings.Join(grepArgs, " ")
 	}
 
 	rawOutput := result.Stdout
@@ -118,7 +132,7 @@ func runGrep(cmd *cobra.Command, args []string) error {
 		}
 		msg := fmt.Sprintf("no matches for '%s'\n", pattern)
 		fmt.Print(msg)
-		trackAnalytics(start, args, rawOutput, msg, result.ExitCode)
+		trackAnalytics(start, args, rawOutput, msg, len(msg), result.ExitCode)
 		return nil
 	}
 
@@ -193,8 +207,10 @@ func runGrep(cmd *cobra.Command, args []string) error {
 	}
 
 	rendered := buf.String()
-	fmt.Print(rendered)
-	trackAnalytics(start, args, rawOutput, rendered, result.ExitCode)
+	// Never hand back more than the plain search would have. Grouping headers
+	// can outweigh the trimming on a small result set.
+	printed, _ := printBetterN(rawOutput, rendered)
+	trackAnalytics(start, args, rawOutput, rendered, printed, result.ExitCode)
 	return nil
 }
 
@@ -202,8 +218,12 @@ func runGrep(cmd *cobra.Command, args []string) error {
 type rgJSONMsg struct {
 	Type string `json:"type"`
 	Data struct {
-		Path  struct{ Text string `json:"text"` } `json:"path"`
-		Lines struct{ Text string `json:"text"` } `json:"lines"`
+		Path struct {
+			Text string `json:"text"`
+		} `json:"path"`
+		Lines struct {
+			Text string `json:"text"`
+		} `json:"lines"`
 		LineNumber int `json:"line_number"`
 	} `json:"data"`
 }
@@ -409,13 +429,28 @@ func compactPath(path string) string {
 	return fmt.Sprintf("%s/.../%s/%s", parts[0], parts[len(parts)-2], parts[len(parts)-1])
 }
 
-func trackAnalytics(start time.Time, args []string, rawOutput, rendered string, exitCode int) {
+// baselineCmd is the exact command the recorded saving is measured against.
+// Set by the search path that actually ran so the log row can be re-run and
+// checked by hand.
+var (
+	grepBaselineCmd  string
+	grepBaselineKind = analytics.BaselineAsInvoked
+)
+
+func trackAnalytics(start time.Time, args []string, rawOutput, rendered string, printed, exitCode int) {
+	if printed <= 0 {
+		printed = len(rendered)
+	}
 	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "grep",
 			ArgsSummary:   strings.Join(args, " "),
 			CharsRaw:      len(rawOutput),
 			CharsRendered: len(rendered),
+			CharsPrinted:  printed,
+			BaselineCmd:   grepBaselineCmd,
+			YeetCmd:       "yeet grep " + strings.Join(args, " "),
+			BaselineKind:  grepBaselineKind,
 			ExitCode:      exitCode,
 			DurationMs:    time.Since(start).Milliseconds(),
 		}); err != nil {

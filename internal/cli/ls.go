@@ -32,7 +32,7 @@ var yeetPersistentFlags = map[string]bool{
 	"--raw":          true,
 }
 
-func parseLSArgs(args []string) (showAll bool, extraFlags []string, paths []string) {
+func parseLSArgs(args []string) (showAll bool, wantsLong bool, extraFlags []string, paths []string) {
 	for _, a := range args {
 		if yeetPersistentFlags[a] {
 			continue // strip yeet-owned flags before passing to system ls
@@ -44,6 +44,12 @@ func parseLSArgs(args []string) (showAll bool, extraFlags []string, paths []stri
 			stripped := strings.TrimLeft(a, "-")
 			if strings.ContainsRune(stripped, 'a') {
 				showAll = true
+			}
+			// Record the caller's intent before l/a/h are stripped below.
+			// Whether they asked for the long format decides which native
+			// command the saving is fairly measured against.
+			if strings.ContainsRune(stripped, 'l') {
+				wantsLong = true
 			}
 			// Keep any flags beyond l/a/h (e.g. R from -laR)
 			extra := strings.Map(func(r rune) rune {
@@ -63,9 +69,9 @@ func parseLSArgs(args []string) (showAll bool, extraFlags []string, paths []stri
 }
 
 func runLS(cmd *cobra.Command, args []string) error {
-	showAll, extraFlags, paths := parseLSArgs(args)
+	showAll, wantsLong, extraFlags, paths := parseLSArgs(args)
 	return runWithFallback("ls", args, func() error {
-		return runLSImpl(showAll, extraFlags, paths)
+		return runLSImpl(showAll, wantsLong, extraFlags, paths)
 	}, Fallback{
 		Bin: "ls",
 		Args: func(a []string) []string {
@@ -174,7 +180,10 @@ func compactLS(raw string, showAll bool) (string, string) {
 
 	summary := fmt.Sprintf("\nSummary: %d files, %d dirs", len(files), len(dirs))
 	if len(byExt) > 0 {
-		type kv struct{ ext string; count int }
+		type kv struct {
+			ext   string
+			count int
+		}
 		var exts []kv
 		for k, v := range byExt {
 			exts = append(exts, kv{k, v})
@@ -206,20 +215,51 @@ func isTerminal() bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-func runLSImpl(showAll bool, extraFlags, paths []string) error {
+// hasLongFlag reports whether any pass-through flag requests the long listing
+// format. Only short clusters are inspected: a long option such as --color
+// contains an 'l' without asking for anything of the sort.
+func hasLongFlag(flags []string) bool {
+	for _, f := range flags {
+		if strings.HasPrefix(f, "--") || !strings.HasPrefix(f, "-") {
+			continue
+		}
+		if strings.ContainsRune(f[1:], 'l') {
+			return true
+		}
+	}
+	return false
+}
+
+func runLSImpl(showAll, wantsLong bool, extraFlags, paths []string) error {
 	start := time.Now()
 
-	lsArgs := append([]string{"-la"}, extraFlags...)
-	if len(paths) == 0 {
-		lsArgs = append(lsArgs, ".")
-	} else {
-		lsArgs = append(lsArgs, paths...)
+	targets := paths
+	if len(targets) == 0 {
+		targets = []string{"."}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	result := yeetexec.Run(ctx, "ls", lsArgs...)
+
+	// yeet needs the long format to report sizes, so it always runs `ls -la`
+	// internally — but that output is not the baseline. `yeet ls` stands in for
+	// whatever the caller actually typed, and `ls -la` prints far more than a
+	// bare `ls`. Measuring against -la when a bare listing was asked for would
+	// inflate the saving on every single call, so the baseline is the caller's
+	// own command, actually run and actually measured.
+	renderArgs := append(append([]string{"-la"}, extraFlags...), targets...)
+	result := yeetexec.Run(ctx, "ls", renderArgs...)
 	raw := result.Stdout
+
+	baseline := raw
+	baselineArgs := renderArgs
+	if !wantsLong && !hasLongFlag(extraFlags) {
+		plainArgs := append(append([]string{}, extraFlags...), targets...)
+		if b := yeetexec.Run(ctx, "ls", plainArgs...); b.ExitCode == 0 {
+			baseline = b.Stdout
+			baselineArgs = plainArgs
+		}
+	}
 
 	entries, summary := compactLS(raw, showAll)
 
@@ -228,16 +268,23 @@ func runLSImpl(showAll bool, extraFlags, paths []string) error {
 	if isTTY {
 		filtered = entries + summary
 	}
-	printBetter(raw, filtered)
-	rendered := filtered
+	// Compare against the baseline, not the internal `ls -la` output. Comparing
+	// against -la would let a filtered form that is larger than the caller's own
+	// command still win, which is how `yeet ls` ended up printing more than a
+	// bare `ls` while reporting a saving.
+	printed, _ := printBetterN(baseline, filtered)
 
 	if !noAnalytics && db != nil {
 		argsSummary := strings.Join(append(extraFlags, paths...), " ")
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "ls",
 			ArgsSummary:   argsSummary,
-			CharsRaw:      len(raw),
-			CharsRendered: len(rendered),
+			CharsRaw:      len(baseline),
+			CharsRendered: len(filtered),
+			CharsPrinted:  printed,
+			BaselineCmd:   "ls " + strings.Join(baselineArgs, " "),
+			YeetCmd:       "yeet ls " + argsSummary,
+			BaselineKind:  analytics.BaselineAsInvoked,
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),
 		}); err != nil {
