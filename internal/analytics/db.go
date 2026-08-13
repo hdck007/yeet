@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -50,6 +51,10 @@ func (d *DB) Conn() *sql.DB {
 }
 
 func dbFilePath() (string, error) {
+	// YEET_DATA_DIR relocates the store, keeping tests out of real history.
+	if dir := strings.TrimSpace(os.Getenv("YEET_DATA_DIR")); dir != "" {
+		return filepath.Join(dir, "analytics.db"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)
@@ -99,6 +104,23 @@ func migrate(conn *sql.DB) error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_failures_created ON command_failures(created_at);
+
+	-- Re-read suppression for 'yeet read', scoped per conversation.
+	CREATE TABLE IF NOT EXISTS read_cache (
+		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		session_id   TEXT    NOT NULL,
+		path         TEXT    NOT NULL,
+		view_key     TEXT    NOT NULL DEFAULT '',
+		content_hash TEXT    NOT NULL,
+		mtime_ns     INTEGER NOT NULL DEFAULT 0,
+		size         INTEGER NOT NULL DEFAULT 0,
+		render_chars INTEGER NOT NULL DEFAULT 0,
+		render_lines INTEGER NOT NULL DEFAULT 0,
+		seen_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+		UNIQUE (session_id, path, view_key)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_read_cache_seen ON read_cache(seen_at);
 	`
 	if _, err := conn.Exec(schema); err != nil {
 		return err
