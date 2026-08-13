@@ -19,3 +19,4 @@ vendor/
 scripts/test-yarn.lock
 scripts/bench_yeet.sh
 scripts/bench-results/
+.cc-audit/
