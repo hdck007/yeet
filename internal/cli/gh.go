@@ -83,6 +83,21 @@ func planGh(args []string) *ghPlan {
 				render:       renderIssueView,
 			}
 		}
+	case "repo":
+		switch sub {
+		case "view":
+			return &ghPlan{
+				jsonArgs:     append([]string{"repo", "view", "--json", "nameWithOwner,description,isPrivate,isArchived,defaultBranchRef,stargazerCount,forkCount,primaryLanguage,url"}, rest...),
+				baselineArgs: append([]string{"repo", "view"}, rest...),
+				render:       renderRepoView,
+			}
+		case "list":
+			return &ghPlan{
+				jsonArgs:     append([]string{"repo", "list", "--json", "nameWithOwner,description,isPrivate,isArchived,stargazerCount,primaryLanguage"}, rest...),
+				baselineArgs: append([]string{"repo", "list"}, rest...),
+				render:       renderRepoList,
+			}
+		}
 	case "run":
 		switch sub {
 		case "list":
@@ -373,7 +388,106 @@ func renderRunList(b []byte) (string, error) {
 		if state == "" {
 			state = r.Status
 		}
-		fmt.Fprintf(&s, "  %d %-10s %s (%s)\n", r.DatabaseId, state, r.Name, r.HeadBranch)
+		// Only the failures need spelling out; success is the common case and a
+		// short marker is enough to scan past it.
+		fmt.Fprintf(&s, "  %s %d %s (%s)\n", runMarker(state), r.DatabaseId, r.Name, r.HeadBranch)
+	}
+	return s.String(), nil
+}
+
+// runMarker compresses a CI conclusion to a short token. Anything unexpected
+// keeps its full name rather than being silently flattened to "?".
+func runMarker(state string) string {
+	switch state {
+	case "success":
+		return "ok  "
+	case "failure":
+		return "FAIL"
+	case "cancelled":
+		return "cxl "
+	case "skipped":
+		return "skip"
+	case "in_progress":
+		return "run "
+	case "queued", "waiting", "pending", "requested":
+		return "wait"
+	}
+	return state
+}
+
+func renderRepoView(b []byte) (string, error) {
+	var r struct {
+		NameWithOwner    string
+		Description      string
+		IsPrivate        bool
+		IsArchived       bool
+		DefaultBranchRef struct{ Name string }
+		StargazerCount   int
+		ForkCount        int
+		PrimaryLanguage  struct{ Name string }
+		URL              string
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return "", err
+	}
+	var s strings.Builder
+	vis := "public"
+	if r.IsPrivate {
+		vis = "private"
+	}
+	fmt.Fprintf(&s, "%s [%s]", r.NameWithOwner, vis)
+	if r.IsArchived {
+		s.WriteString(" [archived]")
+	}
+	s.WriteString("\n")
+	if r.Description != "" {
+		fmt.Fprintf(&s, "  %s\n", r.Description)
+	}
+	var facts []string
+	if r.PrimaryLanguage.Name != "" {
+		facts = append(facts, r.PrimaryLanguage.Name)
+	}
+	if r.DefaultBranchRef.Name != "" {
+		facts = append(facts, "default "+r.DefaultBranchRef.Name)
+	}
+	facts = append(facts, fmt.Sprintf("%d stars", r.StargazerCount), fmt.Sprintf("%d forks", r.ForkCount))
+	fmt.Fprintf(&s, "  %s\n", strings.Join(facts, " | "))
+	if r.URL != "" {
+		fmt.Fprintf(&s, "  %s\n", r.URL)
+	}
+	return s.String(), nil
+}
+
+func renderRepoList(b []byte) (string, error) {
+	var repos []struct {
+		NameWithOwner   string
+		Description     string
+		IsPrivate       bool
+		IsArchived      bool
+		StargazerCount  int
+		PrimaryLanguage struct{ Name string }
+	}
+	if err := json.Unmarshal(b, &repos); err != nil {
+		return "", err
+	}
+	if len(repos) == 0 {
+		return "no repos\n", nil
+	}
+	var s strings.Builder
+	fmt.Fprintf(&s, "%d repos:\n", len(repos))
+	for _, r := range repos {
+		flags := ""
+		if r.IsPrivate {
+			flags += " [private]"
+		}
+		if r.IsArchived {
+			flags += " [archived]"
+		}
+		lang := ""
+		if r.PrimaryLanguage.Name != "" {
+			lang = " " + r.PrimaryLanguage.Name
+		}
+		fmt.Fprintf(&s, "  %s%s%s\n", r.NameWithOwner, lang, flags)
 	}
 	return s.String(), nil
 }
