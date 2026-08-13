@@ -83,6 +83,21 @@ func planGh(args []string) *ghPlan {
 				render:       renderIssueView,
 			}
 		}
+	case "repo":
+		switch sub {
+		case "view":
+			return &ghPlan{
+				jsonArgs:     append([]string{"repo", "view", "--json", "nameWithOwner,description,isPrivate,isArchived,defaultBranchRef,stargazerCount,forkCount,primaryLanguage,url"}, rest...),
+				baselineArgs: append([]string{"repo", "view"}, rest...),
+				render:       renderRepoView,
+			}
+		case "list":
+			return &ghPlan{
+				jsonArgs:     append([]string{"repo", "list", "--json", "nameWithOwner,description,isPrivate,isArchived,stargazerCount,primaryLanguage"}, rest...),
+				baselineArgs: append([]string{"repo", "list"}, rest...),
+				render:       renderRepoList,
+			}
+		}
 	case "run":
 		switch sub {
 		case "list":
@@ -368,12 +383,129 @@ func renderRunList(b []byte) (string, error) {
 	}
 	var s strings.Builder
 	fmt.Fprintf(&s, "%d runs:\n", len(runs))
+	prevBranch := ""
 	for _, r := range runs {
 		state := r.Conclusion
 		if state == "" {
 			state = r.Status
 		}
-		fmt.Fprintf(&s, "  %d %-10s %s (%s)\n", r.DatabaseId, state, r.Name, r.HeadBranch)
+		branch := shortRef(r.HeadBranch)
+		// Runs come back newest-first and usually cluster on one branch, so the
+		// branch is printed only when it changes. Dropping it outright would be
+		// smaller still, but which branch a run tested is the whole point of
+		// looking at the list.
+		suffix := ""
+		if !ultraCompact && branch != prevBranch {
+			suffix = " (" + branch + ")"
+			prevBranch = branch
+		}
+		fmt.Fprintf(&s, "  %s %d %s%s\n", runMarker(state), r.DatabaseId, r.Name, suffix)
+	}
+	return s.String(), nil
+}
+
+// shortRef trims the ref plumbing off a branch name: refs/pull/29/head is
+// pull/29 to anyone reading it.
+func shortRef(ref string) string {
+	if r := strings.TrimPrefix(ref, "refs/pull/"); r != ref {
+		return "pull/" + strings.TrimSuffix(r, "/head")
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/")
+}
+
+// runMarker compresses a CI conclusion to a short token. Anything unexpected
+// keeps its full name rather than being silently flattened to "?".
+func runMarker(state string) string {
+	switch state {
+	case "success":
+		return "ok"
+	case "failure":
+		return "FAIL"
+	case "cancelled":
+		return "cxl"
+	case "skipped":
+		return "skip"
+	case "in_progress":
+		return "run"
+	case "queued", "waiting", "pending", "requested":
+		return "wait"
+	}
+	return state
+}
+
+func renderRepoView(b []byte) (string, error) {
+	var r struct {
+		NameWithOwner    string
+		Description      string
+		IsPrivate        bool
+		IsArchived       bool
+		DefaultBranchRef struct{ Name string }
+		StargazerCount   int
+		ForkCount        int
+		PrimaryLanguage  struct{ Name string }
+		URL              string
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return "", err
+	}
+	var s strings.Builder
+	vis := "public"
+	if r.IsPrivate {
+		vis = "private"
+	}
+	fmt.Fprintf(&s, "%s [%s]", r.NameWithOwner, vis)
+	if r.IsArchived {
+		s.WriteString(" [archived]")
+	}
+	s.WriteString("\n")
+	if r.Description != "" {
+		fmt.Fprintf(&s, "  %s\n", r.Description)
+	}
+	var facts []string
+	// The primary language is visible from the files themselves, so it is not
+	// worth a line here. The default branch is not inferable and matters for
+	// anything that opens a PR, so it stays unless -u was asked for.
+	if r.DefaultBranchRef.Name != "" && !ultraCompact {
+		facts = append(facts, "@"+r.DefaultBranchRef.Name)
+	}
+	facts = append(facts, fmt.Sprintf("%d stars", r.StargazerCount), fmt.Sprintf("%d forks", r.ForkCount))
+	fmt.Fprintf(&s, "  %s\n", strings.Join(facts, " | "))
+	if r.URL != "" {
+		fmt.Fprintf(&s, "  %s\n", r.URL)
+	}
+	return s.String(), nil
+}
+
+func renderRepoList(b []byte) (string, error) {
+	var repos []struct {
+		NameWithOwner   string
+		Description     string
+		IsPrivate       bool
+		IsArchived      bool
+		StargazerCount  int
+		PrimaryLanguage struct{ Name string }
+	}
+	if err := json.Unmarshal(b, &repos); err != nil {
+		return "", err
+	}
+	if len(repos) == 0 {
+		return "no repos\n", nil
+	}
+	var s strings.Builder
+	fmt.Fprintf(&s, "%d repos:\n", len(repos))
+	for _, r := range repos {
+		flags := ""
+		if r.IsPrivate {
+			flags += " [private]"
+		}
+		if r.IsArchived {
+			flags += " [archived]"
+		}
+		lang := ""
+		if r.PrimaryLanguage.Name != "" {
+			lang = " " + r.PrimaryLanguage.Name
+		}
+		fmt.Fprintf(&s, "  %s%s%s\n", r.NameWithOwner, lang, flags)
 	}
 	return s.String(), nil
 }

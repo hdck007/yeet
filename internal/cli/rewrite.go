@@ -51,12 +51,13 @@ var rules = []rewriteRule{
 // commit, push, rebase, or reset would route a state-changing command through
 // yeet, so those are deliberately absent and pass through untouched.
 var gitReadOnly = map[string]bool{
-	"status": true,
-	"diff":   true,
-	"log":    true,
-	"show":   true,
-	"branch": true,
-	"stash":  true, // only `stash list` is rendered; other forms pass through
+	"status":   true,
+	"diff":     true,
+	"log":      true,
+	"show":     true,
+	"branch":   true, // listing only — see gitBranchMutates
+	"stash":    true, // `stash list` / `stash show` only
+	"worktree": true, // `worktree list` only
 }
 
 // ghReadOnly lists the gh subcommand pairs that are safe to rewrite, keyed
@@ -81,9 +82,16 @@ func safeToRewrite(cmd string) bool {
 	}
 	switch fields[0] {
 	case "git":
-		// `git stash` with no args stashes changes — only `stash list` is safe.
-		if fields[1] == "stash" {
+		switch fields[1] {
+		case "stash":
+			// Bare `git stash` stashes changes; pop/apply/drop change state.
+			return len(fields) >= 3 && (fields[2] == "list" || fields[2] == "show")
+		case "worktree":
+			// add/remove/prune change state.
 			return len(fields) >= 3 && fields[2] == "list"
+		case "branch":
+			// -d/-D/-m/-c or a bare name creates, renames, or deletes.
+			return !gitBranchMutates(fields[2:])
 		}
 		return gitReadOnly[fields[1]]
 	case "gh":
