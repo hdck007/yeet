@@ -82,10 +82,10 @@ func TestIsInlineValue(t *testing.T) {
 		{42.0, true},
 		{true, true},
 		{nil, true},
-		{[]interface{}{1.0, 2.0, 3.0}, true},                           // simple array ≤5
-		{[]interface{}{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, false},          // too long
+		{[]interface{}{1.0, 2.0, 3.0}, true}, // simple array ≤5
+		{[]interface{}{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, false},           // too long
 		{map[string]interface{}{"a": 1.0, "b": "x"}, true},             // small simple map
-		{map[string]interface{}{"a": map[string]interface{}{}}, false},  // nested non-simple
+		{map[string]interface{}{"a": map[string]interface{}{}}, false}, // nested non-simple
 	}
 	for _, c := range cases {
 		got := isInlineValue(c.v)

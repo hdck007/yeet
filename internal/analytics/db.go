@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -50,6 +51,12 @@ func (d *DB) Conn() *sql.DB {
 }
 
 func dbFilePath() (string, error) {
+	// YEET_DATA_DIR relocates the store. Tests use it to stay hermetic instead
+	// of writing into the user's real analytics history, and it gives anyone
+	// running yeet under a sandbox somewhere writable to point at.
+	if dir := strings.TrimSpace(os.Getenv("YEET_DATA_DIR")); dir != "" {
+		return filepath.Join(dir, "analytics.db"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)

@@ -19,3 +19,6 @@ vendor/
 scripts/test-yarn.lock
 scripts/bench_yeet.sh
 scripts/bench-results/
+
+# Git worktrees created under .claude/ are full repo checkouts — never commit one
+.claude/worktrees/

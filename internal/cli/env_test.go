@@ -6,7 +6,10 @@ import (
 )
 
 func TestIsLangVar(t *testing.T) {
-	cases := []struct{ key string; want bool }{
+	cases := []struct {
+		key  string
+		want bool
+	}{
 		{"GOPATH", true},
 		{"GOROOT", true},
 		{"RUSTUP_HOME", true},
@@ -23,7 +26,10 @@ func TestIsLangVar(t *testing.T) {
 }
 
 func TestIsCloudVar(t *testing.T) {
-	cases := []struct{ key string; want bool }{
+	cases := []struct {
+		key  string
+		want bool
+	}{
 		{"AWS_REGION", true},
 		{"GCP_PROJECT", true},
 		{"AZURE_TENANT_ID", true},
@@ -38,7 +44,10 @@ func TestIsCloudVar(t *testing.T) {
 }
 
 func TestIsInterestingVar(t *testing.T) {
-	cases := []struct{ key string; want bool }{
+	cases := []struct {
+		key  string
+		want bool
+	}{
 		{"HOME", true},
 		{"SHELL", true},
 		{"EDITOR", true},
@@ -52,7 +61,10 @@ func TestIsInterestingVar(t *testing.T) {
 }
 
 func TestIsToolVar(t *testing.T) {
-	cases := []struct{ key string; want bool }{
+	cases := []struct {
+		key  string
+		want bool
+	}{
 		{"DOCKER_HOST", true},
 		{"GIT_AUTHOR", true},
 		{"GITHUB_TOKEN", true},
