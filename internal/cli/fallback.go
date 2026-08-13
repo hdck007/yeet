@@ -74,12 +74,21 @@ func stripYeetFlags(args []string) []string {
 			noAnalytics = true
 		case "--raw":
 			rawOutput = true
+		case "-u", "--ultra-compact":
+			ultraCompact = true
 		default:
 			clean = append(clean, a)
 		}
 	}
 	return clean
 }
+
+// ultraCompact drops fields that are useful but not essential — branch names on
+// CI runs, the language on a repo, the branch a stash came from. The default
+// keeps them: a saving that costs the reader a follow-up command is not a
+// saving. This flag is for callers who would rather have the smallest possible
+// output and go without.
+var ultraCompact bool
 
 // printBetter prints filtered if it's shorter than raw; otherwise prints raw.
 // Returns true if filtered was shorter (gain), false if raw was printed (loss).

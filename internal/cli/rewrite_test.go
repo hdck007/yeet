@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A rewrite sends the command to yeet instead of the real binary. For git and
 // gh that is only ever acceptable for read-only subcommands: rewriting
@@ -284,6 +287,132 @@ func TestSafeToRewrite_BranchStashWorktreeArgs(t *testing.T) {
 	for _, c := range unsafe {
 		if safeToRewrite(c) {
 			t.Errorf("safeToRewrite(%q) = true, want false — this changes state", c)
+		}
+	}
+}
+
+// shortRef trims ref plumbing so a run list reads like something a person wrote.
+func TestShortRef(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"main", "main"},
+		{"refs/pull/29/head", "pull/29"},
+		{"refs/pull/1234/head", "pull/1234"},
+		{"refs/heads/feat/x", "feat/x"},
+		{"feat/install-uninstall", "feat/install-uninstall"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := shortRef(c.in); got != c.want {
+			t.Errorf("shortRef(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// isHexish decides whether a leading token in a stash subject is the commit
+// hash git put there (droppable) or the start of the message (must be kept).
+func TestIsHexish(t *testing.T) {
+	for _, s := range []string{"171c8e5", "ea9380e", "abc123", "0123456789abcdef"} {
+		if !isHexish(s) {
+			t.Errorf("isHexish(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "abc", "chore:", "make", "zzzzzzz", "Fix", "12345"} {
+		if isHexish(s) {
+			t.Errorf("isHexish(%q) = true, want false", s)
+		}
+	}
+}
+
+// The stash renderer drops git's "WIP on" boilerplate and the redundant hash,
+// but must keep the branch — that is what tells you whether to pop it.
+func TestRenderGitStash(t *testing.T) {
+	raw := "stash@{0}|WIP on grep-drill-down: 171c8e5 chore: make grep faster\n" +
+		"stash@{1}|WIP on main: ea9380e fix: thing\n"
+
+	ultraCompact = false
+	got := renderGitStash(raw)
+	for _, want := range []string{"stash@{0}", "grep-drill-down", "chore: make grep faster", "stash@{1}", "main"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("renderGitStash() = %q, missing %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"WIP on", "171c8e5", "ea9380e"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("renderGitStash() = %q, should not contain %q", got, unwanted)
+		}
+	}
+
+	// -u drops the branch as well; the ref and message still have to survive.
+	ultraCompact = true
+	u := renderGitStash(raw)
+	ultraCompact = false
+	if strings.Contains(u, "grep-drill-down") {
+		t.Errorf("ultra-compact stash should omit the branch, got %q", u)
+	}
+	if !strings.Contains(u, "chore: make grep faster") || !strings.Contains(u, "stash@{0}") {
+		t.Errorf("ultra-compact stash lost the ref or message: %q", u)
+	}
+	if len(u) >= len(got) {
+		t.Errorf("ultra-compact stash (%d) should be smaller than default (%d)", len(u), len(got))
+	}
+
+	if renderGitStash("") != "no stashes\n" {
+		t.Error("empty stash list should say so")
+	}
+}
+
+// A single worktree needs no count line and no indentation.
+func TestRenderGitWorktree(t *testing.T) {
+	one := "worktree /tmp/wt\nHEAD 1234567890abcdef\nbranch refs/heads/feat/x\n"
+	got := renderGitWorktree(one)
+	if strings.Contains(got, "worktrees:") {
+		t.Errorf("single worktree should have no header, got %q", got)
+	}
+	if !strings.Contains(got, "feat/x") || !strings.Contains(got, "1234567") {
+		t.Errorf("worktree lost the branch or hash: %q", got)
+	}
+	if strings.Contains(got, "1234567890") {
+		t.Errorf("hash should be abbreviated to 7 chars, got %q", got)
+	}
+
+	two := one + "worktree /tmp/wt2\nHEAD abcdef1234567890\nbranch refs/heads/other\n"
+	if g := renderGitWorktree(two); !strings.Contains(g, "2 worktrees:") {
+		t.Errorf("two worktrees should be counted, got %q", g)
+	}
+	// A detached worktree has no branch line and must still render.
+	det := "worktree /tmp/d\nHEAD 1234567890abcdef\ndetached\n"
+	if g := renderGitWorktree(det); !strings.Contains(g, "detached") {
+		t.Errorf("detached worktree should say so, got %q", g)
+	}
+	if renderGitWorktree("") != "no worktrees\n" {
+		t.Error("no worktrees should say so")
+	}
+}
+
+// git's global options come before the subcommand; missing them cost all
+// compaction on `git -C path status` and `git --no-pager log`.
+func TestSplitGitGlobals(t *testing.T) {
+	cases := []struct {
+		in              []string
+		wantG, wantRest []string
+	}{
+		{[]string{"status"}, nil, []string{"status"}},
+		{[]string{"-C", "/tmp", "status"}, []string{"-C", "/tmp"}, []string{"status"}},
+		{[]string{"--no-pager", "log", "-5"}, []string{"--no-pager"}, []string{"log", "-5"}},
+		{[]string{"-c", "core.pager=cat", "status"}, []string{"-c", "core.pager=cat"}, []string{"status"}},
+		{[]string{"--git-dir=/tmp/.git", "status"}, []string{"--git-dir=/tmp/.git"}, []string{"status"}},
+		{[]string{"-C", "/a", "--no-pager", "diff"}, []string{"-C", "/a", "--no-pager"}, []string{"diff"}},
+		// A subcommand flag is not a global and must be left alone.
+		{[]string{"log", "--oneline"}, nil, []string{"log", "--oneline"}},
+		{[]string{"--unknown-flag", "status"}, nil, []string{"--unknown-flag", "status"}},
+	}
+	for _, c := range cases {
+		g, rest := splitGitGlobals(c.in)
+		if strings.Join(g, " ") != strings.Join(c.wantG, " ") {
+			t.Errorf("splitGitGlobals(%v) globals = %v, want %v", c.in, g, c.wantG)
+		}
+		if strings.Join(rest, " ") != strings.Join(c.wantRest, " ") {
+			t.Errorf("splitGitGlobals(%v) rest = %v, want %v", c.in, rest, c.wantRest)
 		}
 	}
 }

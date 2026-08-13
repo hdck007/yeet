@@ -383,16 +383,34 @@ func renderRunList(b []byte) (string, error) {
 	}
 	var s strings.Builder
 	fmt.Fprintf(&s, "%d runs:\n", len(runs))
+	prevBranch := ""
 	for _, r := range runs {
 		state := r.Conclusion
 		if state == "" {
 			state = r.Status
 		}
-		// Only the failures need spelling out; success is the common case and a
-		// short marker is enough to scan past it.
-		fmt.Fprintf(&s, "  %s %d %s (%s)\n", runMarker(state), r.DatabaseId, r.Name, r.HeadBranch)
+		branch := shortRef(r.HeadBranch)
+		// Runs come back newest-first and usually cluster on one branch, so the
+		// branch is printed only when it changes. Dropping it outright would be
+		// smaller still, but which branch a run tested is the whole point of
+		// looking at the list.
+		suffix := ""
+		if !ultraCompact && branch != prevBranch {
+			suffix = " (" + branch + ")"
+			prevBranch = branch
+		}
+		fmt.Fprintf(&s, "  %s %d %s%s\n", runMarker(state), r.DatabaseId, r.Name, suffix)
 	}
 	return s.String(), nil
+}
+
+// shortRef trims the ref plumbing off a branch name: refs/pull/29/head is
+// pull/29 to anyone reading it.
+func shortRef(ref string) string {
+	if r := strings.TrimPrefix(ref, "refs/pull/"); r != ref {
+		return "pull/" + strings.TrimSuffix(r, "/head")
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(ref, "refs/heads/"), "refs/")
 }
 
 // runMarker compresses a CI conclusion to a short token. Anything unexpected
@@ -400,15 +418,15 @@ func renderRunList(b []byte) (string, error) {
 func runMarker(state string) string {
 	switch state {
 	case "success":
-		return "ok  "
+		return "ok"
 	case "failure":
 		return "FAIL"
 	case "cancelled":
-		return "cxl "
+		return "cxl"
 	case "skipped":
 		return "skip"
 	case "in_progress":
-		return "run "
+		return "run"
 	case "queued", "waiting", "pending", "requested":
 		return "wait"
 	}
@@ -444,11 +462,11 @@ func renderRepoView(b []byte) (string, error) {
 		fmt.Fprintf(&s, "  %s\n", r.Description)
 	}
 	var facts []string
-	if r.PrimaryLanguage.Name != "" {
-		facts = append(facts, r.PrimaryLanguage.Name)
-	}
-	if r.DefaultBranchRef.Name != "" {
-		facts = append(facts, "default "+r.DefaultBranchRef.Name)
+	// The primary language is visible from the files themselves, so it is not
+	// worth a line here. The default branch is not inferable and matters for
+	// anything that opens a PR, so it stays unless -u was asked for.
+	if r.DefaultBranchRef.Name != "" && !ultraCompact {
+		facts = append(facts, "@"+r.DefaultBranchRef.Name)
 	}
 	facts = append(facts, fmt.Sprintf("%d stars", r.StargazerCount), fmt.Sprintf("%d forks", r.ForkCount))
 	fmt.Fprintf(&s, "  %s\n", strings.Join(facts, " | "))

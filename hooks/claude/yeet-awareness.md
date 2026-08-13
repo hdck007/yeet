@@ -56,6 +56,11 @@ actual lines, either read the specific files it named, or use
 `yeet git diff --content`, which keeps the changed lines with the index/mode/@@
 noise stripped and caps the output (40 lines per file, 400 overall).
 
+Add `-u` to any git or gh command for the smallest possible output. It drops
+fields that are useful but not essential — the branch a CI run tested, the
+branch a stash came from, a repo's default branch. The default keeps them,
+because a saving that costs you a follow-up command is not a saving.
+
 `git -C <path>`, `--no-pager`, `-c key=val`, `--git-dir`, and the other git
 global options are understood and passed through, so those forms stay compact
 too.

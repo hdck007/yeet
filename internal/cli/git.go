@@ -373,7 +373,7 @@ func renderGitStatus(raw string) string {
 
 	var b strings.Builder
 	if branch != "" {
-		fmt.Fprintf(&b, "branch: %s\n", branch)
+		fmt.Fprintf(&b, "* %s\n", branch)
 	}
 	if len(staged)+len(unstaged)+len(untracked)+len(conflicts) == 0 {
 		b.WriteString("clean\n")
@@ -609,17 +609,52 @@ func renderGitStash(raw string) string {
 		return "no stashes\n"
 	}
 	var b strings.Builder
-	n := 0
 	sc := bufio.NewScanner(strings.NewReader(raw))
 	for sc.Scan() {
 		f := strings.SplitN(sc.Text(), "|", 2)
 		if len(f) != 2 {
 			continue
 		}
-		n++
-		fmt.Fprintf(&b, "%s %s\n", f[0], f[1])
+		ref, subject := f[0], f[1]
+		// git renders a stash subject as "WIP on <branch>: <hash> <message>".
+		// The literal "WIP on" and the hash carry nothing; the branch is the
+		// thing you need in order to decide whether to pop it, so that stays
+		// unless the caller asked for the smallest possible output.
+		branch := ""
+		if rest := strings.TrimPrefix(subject, "WIP on "); rest != subject {
+			if i := strings.Index(rest, ": "); i > 0 {
+				branch = rest[:i]
+				rest = rest[i+2:]
+			}
+			// Drop the leading abbreviated hash if git included one.
+			if sp := strings.IndexByte(rest, ' '); sp > 0 && isHexish(rest[:sp]) {
+				rest = rest[sp+1:]
+			}
+			subject = rest
+		}
+		if branch != "" && !ultraCompact {
+			fmt.Fprintf(&b, "%s %s: %s\n", ref, branch, subject)
+		} else {
+			fmt.Fprintf(&b, "%s %s\n", ref, subject)
+		}
 	}
-	return fmt.Sprintf("%d stashes:\n", n) + b.String()
+	if b.Len() == 0 {
+		return "no stashes\n"
+	}
+	return b.String()
+}
+
+// isHexish reports whether s looks like an abbreviated commit hash.
+func isHexish(s string) bool {
+	if len(s) < 6 || len(s) > 40 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // renderGitWorktree reduces porcelain worktree output to one line each.
@@ -631,8 +666,8 @@ func renderGitWorktree(raw string) string {
 			return
 		}
 		short := head
-		if len(short) > 8 {
-			short = short[:8]
+		if len(short) > 7 {
+			short = short[:7]
 		}
 		disp := path
 		if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(disp, home) {
@@ -661,6 +696,10 @@ func renderGitWorktree(raw string) string {
 	flush()
 	if len(out) == 0 {
 		return "no worktrees\n"
+	}
+	// One worktree is the common case and needs no count or indentation.
+	if len(out) == 1 {
+		return out[0] + "\n"
 	}
 	return fmt.Sprintf("%d worktrees:\n", len(out)) + "  " + strings.Join(out, "\n  ") + "\n"
 }
