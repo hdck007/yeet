@@ -1,0 +1,54 @@
+# Commands an agent actually issues, used by scripts/bench-verbs.sh to measure
+# how many of them the rewrite hook catches. Chained forms are deliberately
+# over-represented: they are most of what a real session looks like, and they
+# were the shape that used to pass through untouched.
+cat src/index.ts
+cat package.json && ls src
+cat a.ts; cat b.ts
+grep -rn useState src | head -20
+grep -rn TODO . | head -50
+ls src/components
+git status --short
+git log --oneline -10
+git status && git diff
+cat tsconfig.json && cat package.json
+vitest run
+npx vitest run src/api
+vitest run --reporter=verbose
+tsc --noEmit
+npx tsc -p tsconfig.json
+eslint src
+npx eslint . --ext .ts,.tsx
+ps aux
+ps -ef
+du -sh *
+du -h node_modules
+kubectl get pods
+kubectl get pods -A
+kubectl describe pod api-0
+kubectl logs deploy/api --tail=500
+docker ps
+docker ps -a
+docker images
+docker compose logs api
+npm install
+npm ci
+pnpm install --frozen-lockfile
+yarn add lodash
+npm run build
+npm ls --depth 0
+npm outdated
+next build
+playwright test
+prettier --check .
+cat README.md && git status
+grep -rn "export function" src | head -30
+ls && cat package.json && git status
+tsc --noEmit 2>&1 | head -20
+cat a.ts && npm run build
+find . -name '*.test.ts'
+cat src/app.ts; grep -rn app src; ls dist
+git diff --stat && git log -3
+kubectl get pods && kubectl get svc
+docker ps && docker images
+du -sh node_modules && ls -la

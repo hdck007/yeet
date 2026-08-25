@@ -65,6 +65,48 @@ because a saving that costs you a follow-up command is not a saving.
 global options are understood and passed through, so those forms stay compact
 too.
 
+## Tests, builds, and package managers
+
+A passing test run prints a line per test; a failing one prints a stack trace per
+failure. An install prints a deprecation warning per transitive dependency. In
+every case the useful part is a few lines and the rest is volume.
+
+```bash
+yeet vitest [args]              # failures only, with the stack trimmed
+yeet tsc [args]                 # errors grouped by file, capped per file
+yeet lint [args]                # violations grouped by rule
+yeet playwright [args]          # failures only
+yeet prettier [args]            # only the files that need formatting
+yeet next build [args]          # routes and bundle sizes (build only)
+yeet prisma [args]              # decoration and ASCII art stripped
+
+yeet npm  <cmd>                 # what changed, plus a count of the warnings
+yeet pnpm <cmd>
+yeet yarn <cmd>
+```
+
+## Processes, disks, clusters, containers
+
+```bash
+yeet ps aux                     # totals, CPU/memory leaders, then grouped by program
+yeet du -sh *                   # largest first, long tail collapsed
+yeet kubectl get pods           # health summary; only the not-ready rows in full
+yeet kubectl describe <res>     # status, conditions and events; annotations dropped
+yeet kubectl logs <res>         # repeated lines collapsed, both ends kept
+yeet docker ps                  # grouped by status; id/command/created columns dropped
+yeet docker images
+yeet docker logs <c>            # repeated lines collapsed
+```
+
+`yeet ps` labels interpreters by what they are running, so a machine with
+fourteen `node` processes reports `node:vitest`, `node:server` and so on rather
+than fourteen identical rows.
+
+**Read-only subcommands only**, same boundary as git and gh: `kubectl apply`,
+`kubectl delete`, `kubectl exec`, `docker run`, `docker rm`, `docker compose up`
+and every other mutation must reach the real binary. The proxy hook refuses to
+rewrite them; do not route them through yeet by hand.
+
 ## Reference
 
 ```bash
@@ -93,5 +135,23 @@ content here
 WRITE
 ```
 
-> In compound commands use `yeet` explicitly in every segment:
-> `cd /path && yeet read file.go` ✓   `cd /path && cat file.go` ✗
+## Chained commands
+
+The proxy hook splits a chain on `;`, `&&`, `||`, `|` and newlines and rewrites
+each command in it, so `cat pkg.json && ls src` becomes
+`yeet read pkg.json && yeet ls src` without you doing anything.
+
+Two shapes it deliberately leaves alone, because a rewrite there would change
+the answer rather than shorten it:
+
+- **A command that reads the pipe.** `git log | grep fix` stays as it is —
+  `yeet grep` searches the working tree, not standard input.
+- **A consumer that parses the exact bytes.** `cat data.json | jq .name`,
+  `ls | wc -l` — reshaping the producer would make jq fail and wc count the
+  wrong thing. Piping into `head`, `tail`, `less`, `more` or `cat` is fine and
+  is rewritten.
+
+Writing `yeet` yourself in every segment is still the most reliable thing to do:
+
+> `cd /path && yeet read file.go` ✓   `cd /path && cat file.go` ✓ (rewritten for you)
+> `yeet read data.json | jq .name` ✗ — read the file, then work from what it says

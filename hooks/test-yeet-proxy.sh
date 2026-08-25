@@ -58,9 +58,13 @@ echo ""
 echo "--- Core rewrites ---"
 test_rewrite "cat file"         "cat README.md"          "yeet read README.md"
 test_rewrite "grep pattern"     "grep foo ."             "yeet grep foo ."
-test_rewrite "grep with flags"  "grep -rn foo src/"      "yeet grep -rn foo src/"
+# yeet grep is always recursive and always numbers lines, so -r and -n are
+# implied; forwarding them makes its flag parser reject the command.
+test_rewrite "grep with flags"  "grep -rn foo src/"      "yeet grep foo src/"
 test_rewrite "ls with path"     "ls src/"                "yeet ls src/"
-test_rewrite "find pattern"     "find . -name '*.go'"    "yeet find . -name '*.go'"
+# Native find is `find <path> -name <pattern>`; yeet find is
+# `yeet find <pattern> [path]`, so the operands are swapped.
+test_rewrite "find pattern"     "find . -name '*.go'"    "yeet find '*.go' ."
 test_rewrite "diff two files"   "diff a.go b.go"         "yeet diff a.go b.go"
 
 echo ""
@@ -69,8 +73,51 @@ test_rewrite "env + cat"        "DEBUG=1 cat foo.go"     "DEBUG=1 yeet read foo.
 test_rewrite "env + grep"       "CI=1 grep foo ."        "CI=1 yeet grep foo ."
 
 echo ""
+echo "--- Chained commands (each segment rewritten on its own) ---"
+test_rewrite "semicolon chain"   "cat a.ts; cat b.ts"          "yeet read a.ts; yeet read b.ts"
+test_rewrite "and chain"         "cat pkg.json && ls src"      "yeet read pkg.json && yeet ls src"
+test_rewrite "or chain"          "cat a.ts || ls"              "yeet read a.ts || yeet ls"
+test_rewrite "pipe to head"      "grep -rn foo src | head -20" "yeet grep foo src | head -20"
+test_rewrite "three segments"    "ls && cat pkg.json && git status" \
+                                 "yeet ls && yeet read pkg.json && yeet git status"
+test_rewrite "spacing preserved" "cat a.ts   &&   ls   src"    "yeet read a.ts   &&   yeet ls   src"
+test_rewrite "stderr redirect"   "grep foo src 2>/dev/null"    "yeet grep foo src 2>/dev/null"
+test_rewrite "partial chain"     "cat a.ts b.ts && ls src"     "cat a.ts b.ts && yeet ls src"
+
+echo ""
+echo "--- Chains that must NOT be rewritten ---"
+test_rewrite "pipe into jq"      "cat data.json | jq .name"    ""
+test_rewrite "pipe into wc"      "ls | wc -l"                  ""
+test_rewrite "grep as consumer"  "git log | grep fix"          ""
+test_rewrite "stdout to file"    "cat a.ts > b.ts"             ""
+test_rewrite "append to file"    "cat a.ts >> log"             ""
+test_rewrite "cmd substitution"  "echo \$(cat version.txt)"     ""
+test_rewrite "backgrounded"      "cat a.ts &"                  ""
+
+echo ""
+echo "--- Verb families ---"
+test_rewrite "ps aux"            "ps aux"                      "yeet ps aux"
+test_rewrite "du"                "du -sh node_modules"         "yeet du -sh node_modules"
+test_rewrite "kubectl get"       "kubectl get pods -A"         "yeet kubectl get pods -A"
+test_rewrite "docker ps"         "docker ps -a"                "yeet docker ps -a"
+test_rewrite "npm query"         "npm outdated"                "yeet npm outdated"
+
+echo ""
+echo "--- Read-only boundary: mutations reach the real binary ---"
+test_rewrite "kubectl apply"     "kubectl apply -f d.yaml"     ""
+test_rewrite "kubectl delete"    "kubectl delete pod api-0"    ""
+test_rewrite "kubectl exec"      "kubectl exec -it api-0 -- sh" ""
+test_rewrite "docker run"        "docker run -it ubuntu"       ""
+test_rewrite "docker rm"         "docker rm -f web"            ""
+test_rewrite "docker compose up" "docker compose up -d"        ""
+
+echo ""
 echo "--- Should NOT rewrite ---"
-test_rewrite "already yeet"     "yeet read foo.go"       ""
+# A bare read of a code file climbs the reading ladder to signatures-only in
+# the same turn. Other yeet commands are left alone.
+test_rewrite "read ladder"      "yeet read foo.go"       "yeet read foo.go -l aggressive"
+test_rewrite "already yeet"     "yeet grep foo ."        ""
+test_rewrite "read non-code"    "yeet read README.md"    ""
 test_rewrite "heredoc"          "cat <<'EOF'
 hello
 EOF"                                                      ""

@@ -14,10 +14,11 @@ import (
 )
 
 var nextCmd = &cobra.Command{
-	Use:   "next [args...]",
-	Short: "Next.js build — routes and bundle sizes only",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runNext,
+	Use:                "next [args...]",
+	Short:              "Next.js build — routes and bundle sizes only",
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runNext,
+	DisableFlagParsing: true, // the wrapped tool owns its flags, not cobra
 }
 
 func init() {
@@ -26,8 +27,11 @@ func init() {
 
 func runNext(cmd *cobra.Command, args []string) error {
 	start := time.Now()
+	args = stripYeetFlags(args)
 
-	buildArgs := append([]string{"build"}, args...)
+	// This wrapper only understands a build, and `build` is always supplied, so
+	// a caller who typed it must not have it repeated as a positional.
+	buildArgs := append([]string{"build"}, dropLeading(args, "build")...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
@@ -41,7 +45,10 @@ func runNext(cmd *cobra.Command, args []string) error {
 
 	raw := result.Stdout + result.Stderr
 	rendered := filterNextBuild(raw, result.ExitCode)
-	fmt.Print(rendered)
+	if rawOutput {
+		rendered = raw
+	}
+	printed, _ := printBetterN(raw, rendered)
 
 	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
@@ -49,6 +56,10 @@ func runNext(cmd *cobra.Command, args []string) error {
 			ArgsSummary:   strings.Join(args, " "),
 			CharsRaw:      len(raw),
 			CharsRendered: len(rendered),
+			CharsPrinted:  printed,
+			BaselineCmd:   "next build " + strings.Join(args, " "),
+			YeetCmd:       "yeet next " + strings.Join(args, " "),
+			BaselineKind:  analytics.BaselineAsInvoked,
 			ExitCode:      result.ExitCode,
 			DurationMs:    time.Since(start).Milliseconds(),
 		}); err != nil {

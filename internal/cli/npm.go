@@ -60,16 +60,26 @@ func runNPM(cmd *cobra.Command, args []string) error {
 	raw := result.Stdout + result.Stderr
 
 	rendered := filterNPMOutput(raw, result.ExitCode)
-	improved := printBetter(raw, rendered)
+	if rawOutput {
+		rendered = raw
+	}
+	printed, _ := printBetterN(raw, rendered)
 
-	if improved && !noAnalytics && db != nil {
+	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "npm",
 			ArgsSummary:   strings.Join(args, " "),
 			CharsRaw:      len(raw),
 			CharsRendered: len(rendered),
-			ExitCode:      result.ExitCode,
-			DurationMs:    time.Since(start).Milliseconds(),
+			CharsPrinted:  printed,
+			// The baseline is the npm invocation yeet actually made, which is
+			// what the caller would have had to type themselves — `yeet npm
+			// build` runs `npm run build`, and `npm build` is not a command.
+			BaselineCmd:  "npm " + strings.Join(npmArgs, " "),
+			YeetCmd:      "yeet npm " + strings.Join(args, " "),
+			BaselineKind: analytics.BaselineAsInvoked,
+			ExitCode:     result.ExitCode,
+			DurationMs:   time.Since(start).Milliseconds(),
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "yeet: analytics error: %v\n", err)
 		}

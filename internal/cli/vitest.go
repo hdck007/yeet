@@ -15,10 +15,11 @@ import (
 )
 
 var vitestCmd = &cobra.Command{
-	Use:   "vitest [args...]",
-	Short: "Vitest test output — failures only",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runVitest,
+	Use:                "vitest [args...]",
+	Short:              "Vitest test output — failures only",
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runVitest,
+	DisableFlagParsing: true, // the wrapped tool owns its flags, not cobra
 }
 
 func init() {
@@ -31,24 +32,29 @@ type vitestTestFile struct {
 }
 
 type vitestResult struct {
-	Status      string   `json:"status"`
-	FullName    string   `json:"fullName"`
+	Status          string   `json:"status"`
+	FullName        string   `json:"fullName"`
 	FailureMessages []string `json:"failureMessages"`
 }
 
 type vitestJSON struct {
-	TestResults      []vitestTestFile `json:"testResults"`
-	NumTotalTests    int              `json:"numTotalTests"`
-	NumPassedTests   int              `json:"numPassedTests"`
-	NumFailedTests   int              `json:"numFailedTests"`
-	NumPendingTests  int              `json:"numPendingTests"`
+	TestResults     []vitestTestFile `json:"testResults"`
+	NumTotalTests   int              `json:"numTotalTests"`
+	NumPassedTests  int              `json:"numPassedTests"`
+	NumFailedTests  int              `json:"numFailedTests"`
+	NumPendingTests int              `json:"numPendingTests"`
 }
 
 func runVitest(cmd *cobra.Command, args []string) error {
 	start := time.Now()
+	args = stripYeetFlags(args)
 
 	runner := detectJSRunner("vitest")
-	jsonArgs := append([]string{"run", "--reporter=json"}, args...)
+	// `run` is always supplied below, so a caller who already typed it would
+	// otherwise get `vitest run --reporter=json run` — where the trailing `run`
+	// is read as a filename filter, matches nothing, and reports that every one
+	// of zero tests passed.
+	jsonArgs := append([]string{"run", "--reporter=json"}, dropLeading(args, "run")...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
