@@ -60,7 +60,18 @@ src/
 | `yeet edit` | ✏️ Surgical text replacement, tiny confirmation | ~95% |
 | `yeet write` | 💾 Write files, get a one-liner back | ~95% |
 | `yeet env` | 🔐 Env vars with secrets masked | ~60% |
+| `yeet ps` | 🧬 Grouped by program, CPU/memory leaders | ~94% |
+| `yeet du` | 💽 Largest first, long tail collapsed | ~98% |
+| `yeet kubectl` | ☸️ Health summary; only not-ready rows in full | ~87–99% |
+| `yeet docker` | 🐳 Grouped by status, wide columns dropped | ~60–86% |
+| `yeet vitest` | 🧪 Failures only, stack trimmed | ~99% |
+| `yeet tsc` | 🔷 Errors grouped by file, capped per file | ~85% |
+| `yeet lint` | 🧹 Violations grouped by rule | ~70% |
+| `yeet npm` / `pnpm` / `yarn` | 📦 What changed, warnings counted | ~99% |
 | `yeet stats` | 📊 Token savings dashboard | — |
+
+Savings are measured, not estimated — see [Real Numbers](#-real-numbers) for the
+command that reproduces them.
 
 ---
 
@@ -285,6 +296,54 @@ yeet diff file1.go file2.go                          # compact diff
 yeet env                                             # filtered env vars
 ```
 
+### Tests, builds, and package managers
+
+```bash
+yeet vitest run                                      # failures only
+yeet tsc --noEmit                                    # errors grouped by file
+yeet lint src                                        # violations grouped by rule
+yeet npm install                                     # what changed + warning count
+yeet pnpm install --frozen-lockfile
+```
+
+### Processes, disks, clusters, containers
+
+```bash
+yeet ps aux                                          # totals, leaders, then grouped
+yeet du -sh *                                        # largest first
+yeet kubectl get pods -A                             # health summary; not-ready in full
+yeet kubectl describe pod api-0                      # status + events, annotations dropped
+yeet docker ps -a                                    # grouped by status
+```
+
+`kubectl` and `docker` follow the same read-only boundary as `git` and `gh`:
+`apply`, `delete`, `exec`, `run`, `rm`, `compose up` and every other mutation
+reaches the real binary untouched.
+
+### Chained commands
+
+The proxy hook splits a command on `;`, `&&`, `||`, `|` and newlines and
+rewrites each segment:
+
+```bash
+cat pkg.json && ls src        # → yeet read pkg.json && yeet ls src
+grep -rn foo src | head -20   # → yeet grep foo src | head -20
+cat a.ts; cat b.ts            # → yeet read a.ts; yeet read b.ts
+```
+
+Two shapes are deliberately left alone, because rewriting them would change the
+answer rather than shorten it:
+
+- **A command reading the pipe** — `git log | grep fix`. `yeet grep` searches the
+  working tree, not stdin.
+- **A consumer that parses the exact bytes** — `cat data.json | jq .name`,
+  `ls | wc -l`. Piping into `head`, `tail`, `less`, `more` or `cat` is safe and
+  is rewritten.
+
+A chain whose segments are not all read-only still gets rewritten, but the
+permission prompt is kept: `cat a.ts && rm -rf build` becomes
+`yeet read a.ts && rm -rf build` and is shown to you rather than auto-allowed.
+
 ### Analytics
 
 ```bash
@@ -352,6 +411,77 @@ Run `bash demo.sh` from the repo root to see live savings on this codebase:
 | `read -l agg` | ~3,200 chars | ~200 chars | **94%** |
 | `glob` | ~600 chars | ~480 chars | **20%** |
 | `diff` | ~2,400 chars | ~1,600 chars | **33%** |
+
+### The noisy verbs
+
+`ps aux`, `kubectl get pods` and `docker ps` print something different on every
+machine, so a number measured against a live cluster would not be reproducible.
+`scripts/bench-verbs.sh` generates fixed fixtures instead — same bytes every
+run, on any machine, with no cluster, no daemon and no `node_modules`:
+
+```bash
+bash scripts/bench-verbs.sh
+```
+
+| Command | Raw bytes | Yeet bytes | Tokens saved | Cut |
+|---|---|---|---|---|
+| `ps aux` | 96,901 | 3,664 | 23,310 | **96.2%** |
+| `du -h .` | 106,730 | 2,277 | 26,113 | **97.9%** |
+| `kubectl get pods -A` | 19,614 | 461 | 4,788 | **97.6%** |
+| `kubectl describe pod` | 57,260 | 289 | 14,242 | **99.5%** |
+| `kubectl logs deploy/api` | 82,899 | 11,006 | 17,973 | **86.7%** |
+| `docker ps -a` | 11,639 | 4,619 | 1,755 | **60.3%** |
+| `docker images` | 14,591 | 1,998 | 3,148 | **86.3%** |
+| `docker compose logs` | 39,985 | 6,862 | 8,281 | **82.8%** |
+| `vitest run` | 37,980 | 419 | 9,390 | **98.9%** |
+| `tsc --noEmit` | 40,846 | 12,734 | 7,028 | **68.8%** |
+| `npm install` | 67,315 | 123 | 16,798 | **99.8%** |
+| `pnpm install` | 67,315 | 125 | 16,797 | **99.8%** |
+| **Total** | **643,075** | **44,577** | **149,624** | **93.1%** |
+
+### On real output
+
+Fixtures keep the numbers reproducible; these were taken from actual tools on a
+developer machine and one live staging cluster, and are the numbers that
+matter. `kubectl get pods -A` on a 4,000-pod cluster is a single command that
+costs ~159,000 tokens raw:
+
+| Real command | Raw bytes | Yeet bytes | Tokens saved | Cut |
+|---|---|---|---|---|
+| `kubectl get pods -A` (4,011 pods) | 635,311 | 3,649 | 157,915 | **99.4%** |
+| `du -h /opt/homebrew/lib` | 241,512 | 2,170 | 59,835 | **99.1%** |
+| `ps aux` (478 processes) | 159,692 | 4,471 | 38,805 | **97.2%** |
+| `ps -ef` | 141,120 | 3,322 | 34,449 | **97.6%** |
+| `npm install` (166 packages) | 1,286 | 70 | 304 | **94.6%** |
+
+The `kubectl` line is not just shorter, it is a better answer: instead of 4,012
+rows it opens with
+
+```
+4011 resources: 3547 Running, 169 Completed, 163 ImagePullBackOff, 37 Error,
+31 CrashLoopBackOff, 31 ContainerStatusUnknown, 20 ContainerCreating, ...
+```
+
+and then lists the not-ready rows in full, saying how many it capped.
+
+That `npm install` is small in absolute terms only because the machine it ran on
+wraps npm in a tool that already suppresses most of its output; against a plain
+npm the raw side is far larger.
+
+The same script reports how many commands the hook actually rewrites, which is
+the other half of the number — a renderer nothing routes to saves nothing:
+
+| | Rewritten | Auto-allowed | Prompted | Coverage |
+|---|---|---|---|---|
+| v0.1.8 | 8 / 50 | 8 | 0 | 16.0% |
+| this build | 50 / 50 | 33 | 17 | **100.0%** |
+
+...over `scripts/bench-corpus.txt`, 50 commands of the kind an agent issues,
+with chained forms over-represented because that is what a real session looks
+like. `scripts/bench-corpus-negative.txt` holds the other side: 34 commands
+that must come back untouched — every state change, plus every shape where a
+rewrite would answer the question wrongly. The script fails if any of them
+leaks.
 
 ---
 

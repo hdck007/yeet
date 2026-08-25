@@ -13,10 +13,11 @@ import (
 )
 
 var prettierCmd = &cobra.Command{
-	Use:   "prettier [args...]",
-	Short: "Run prettier, show only files that need formatting",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runPrettier,
+	Use:                "prettier [args...]",
+	Short:              "Run prettier, show only files that need formatting",
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runPrettier,
+	DisableFlagParsing: true, // the wrapped tool owns its flags, not cobra
 }
 
 func init() {
@@ -25,6 +26,7 @@ func init() {
 
 func runPrettier(cmd *cobra.Command, args []string) error {
 	start := time.Now()
+	args = stripYeetFlags(args)
 
 	prettier := detectPrettierBin()
 	if prettier == "" {

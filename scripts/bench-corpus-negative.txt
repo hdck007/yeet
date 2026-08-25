@@ -1,0 +1,51 @@
+# Commands that must come back from `yeet rewrite` untouched (exit 1).
+# Two kinds: state changes that must reach the real binary, and shapes where a
+# rewrite would answer the question wrongly rather than more briefly.
+
+# --- a consumer parses the exact bytes, or reads stdin ---
+cat data.json | jq .name
+ls | wc -l
+git log | grep fix
+cat a.ts | sort -u
+cat access.log | awk '{print $1}'
+
+# --- stdout does not go to the caller ---
+cat a.ts > b.ts
+cat build.log >> archive.log
+wc -l < a.ts
+
+# --- the shape cannot be split safely ---
+echo $(cat version.txt)
+cat a.ts &
+
+# --- state changes ---
+git commit -m "wip"
+git push origin main
+git reset --hard
+gh pr merge 29
+gh pr create --title x
+kubectl apply -f deploy.yaml
+kubectl delete pod api-0
+kubectl exec -it api-0 -- sh
+kubectl port-forward svc/api 8080:80
+kubectl rollout restart deploy/api
+kubectl config use-context prod
+docker run -it ubuntu
+docker rm -f web
+docker rmi nginx
+docker build -t app .
+docker exec -it web sh
+docker push app:latest
+docker compose up -d
+docker compose down
+docker system prune -a
+
+# --- a yeet wrapper exists but does not cover this subcommand ---
+next dev
+next start
+
+# --- no yeet equivalent ---
+make build
+go test ./...
+echo hello
+cd /tmp

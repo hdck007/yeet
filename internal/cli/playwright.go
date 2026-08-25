@@ -14,10 +14,11 @@ import (
 )
 
 var playwrightCmd = &cobra.Command{
-	Use:   "playwright [args...]",
-	Short: "Playwright E2E test output — failures only",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runPlaywright,
+	Use:                "playwright [args...]",
+	Short:              "Playwright E2E test output — failures only",
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runPlaywright,
+	DisableFlagParsing: true, // the wrapped tool owns its flags, not cobra
 }
 
 func init() {
@@ -32,8 +33,8 @@ type pwStats struct {
 }
 
 type pwSpec struct {
-	Title string    `json:"title"`
-	Tests []pwTest  `json:"tests"`
+	Title string   `json:"title"`
+	Tests []pwTest `json:"tests"`
 }
 
 type pwTest struct {
@@ -64,14 +65,17 @@ type pwJSON struct {
 
 func runPlaywright(cmd *cobra.Command, args []string) error {
 	start := time.Now()
+	args = stripYeetFlags(args)
 
 	pw := "playwright"
 	if !yeetexec.Available("playwright") {
 		pw = ""
 	}
 
+	// Same duplication hazard as vitest: `test` is always supplied here, so a
+	// caller who typed it must not have it appended again as a path filter.
 	reporterArgs := []string{"test", "--reporter=json"}
-	reporterArgs = append(reporterArgs, args...)
+	reporterArgs = append(reporterArgs, dropLeading(args, "test")...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()

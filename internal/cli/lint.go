@@ -15,10 +15,11 @@ import (
 )
 
 var lintCmd = &cobra.Command{
-	Use:   "lint [args...]",
-	Short: "ESLint/Biome linter output grouped by rule",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runLint,
+	Use:                "lint [args...]",
+	Short:              "ESLint/Biome linter output grouped by rule",
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runLint,
+	DisableFlagParsing: true, // the wrapped tool owns its flags, not cobra
 }
 
 func init() {
@@ -42,6 +43,7 @@ type eslintResult struct {
 
 func runLint(cmd *cobra.Command, args []string) error {
 	start := time.Now()
+	args = stripYeetFlags(args)
 
 	// Detect linter
 	linter := detectLinter()
@@ -60,7 +62,10 @@ func runLint(cmd *cobra.Command, args []string) error {
 	result := yeetexec.Run(ctx, linter, lintArgs...)
 	raw := result.Stdout + result.Stderr
 	rendered := filterLintOutput(raw, result.ExitCode)
-	fmt.Print(rendered)
+	if rawOutput {
+		rendered = raw
+	}
+	printed, _ := printBetterN(raw, rendered)
 
 	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
@@ -68,8 +73,15 @@ func runLint(cmd *cobra.Command, args []string) error {
 			ArgsSummary:   strings.Join(args, " "),
 			CharsRaw:      len(raw),
 			CharsRendered: len(rendered),
-			ExitCode:      result.ExitCode,
-			DurationMs:    time.Since(start).Milliseconds(),
+			CharsPrinted:  printed,
+			// yeet asks the linter for JSON so it can group by rule, which is
+			// larger than the human report the caller would have seen. The
+			// baseline is therefore not what was measured here.
+			BaselineCmd:  linter + " " + strings.Join(args, " "),
+			YeetCmd:      "yeet lint " + strings.Join(args, " "),
+			BaselineKind: analytics.BaselineSynthetic,
+			ExitCode:     result.ExitCode,
+			DurationMs:   time.Since(start).Milliseconds(),
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "yeet: analytics error: %v\n", err)
 		}

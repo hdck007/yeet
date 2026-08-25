@@ -32,13 +32,29 @@ jobs:
           done
 
       - name: Shellcheck
-        run: shellcheck -S error install.sh uninstall.sh scripts/test-install.sh scripts/bench-offline.sh
+        run: shellcheck -S error install.sh uninstall.sh scripts/test-install.sh scripts/bench-offline.sh scripts/bench-verbs.sh
 
       - name: Install/uninstall test suite
         run: NO_COLOR=1 bash scripts/test-install.sh
 
       - name: Offline benchmark (smoke)
         run: NO_COLOR=1 bash scripts/bench-offline.sh --quiet
+
+      # The rewrite hook decides what reaches the model and what skips the
+      # permission prompt, so both halves are gated here: the proxy suite pins
+      # every rewrite it produces, and bench-verbs exits non-zero if any
+      # command from the must-not-rewrite corpus leaks through.
+      - name: Build yeet for the hook suite
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          go build -o "$RUNNER_TEMP/bin/yeet" ./cmd/yeet
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Proxy hook rewrite suite
+        run: NO_COLOR=1 bash hooks/test-yeet-proxy.sh
+
+      - name: Verb benchmark and must-not-rewrite corpus
+        run: NO_COLOR=1 bash scripts/bench-verbs.sh --yeet "$RUNNER_TEMP/bin/yeet"
 
   # ── Linux release binaries (CGO, so they cannot be cross-built on macOS) ─────
   build-linux:

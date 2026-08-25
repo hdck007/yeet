@@ -13,10 +13,11 @@ import (
 )
 
 var prismaCmd = &cobra.Command{
-	Use:   "prisma [args...]",
-	Short: "Prisma CLI — strips ASCII art and decoration",
-	Args:  cobra.ArbitraryArgs,
-	RunE:  runPrisma,
+	Use:                "prisma [args...]",
+	Short:              "Prisma CLI — strips ASCII art and decoration",
+	Args:               cobra.ArbitraryArgs,
+	RunE:               runPrisma,
+	DisableFlagParsing: true, // the wrapped tool owns its flags, not cobra
 }
 
 func init() {
@@ -25,6 +26,7 @@ func init() {
 
 func runPrisma(cmd *cobra.Command, args []string) error {
 	start := time.Now()
+	args = stripYeetFlags(args)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
@@ -38,7 +40,10 @@ func runPrisma(cmd *cobra.Command, args []string) error {
 
 	raw := result.Stdout + result.Stderr
 	rendered := filterPrismaOutput(raw, result.ExitCode)
-	fmt.Print(rendered)
+	if rawOutput {
+		rendered = raw
+	}
+	printed, _ := printBetterN(raw, rendered)
 
 	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
@@ -46,6 +51,10 @@ func runPrisma(cmd *cobra.Command, args []string) error {
 			ArgsSummary:   strings.Join(args, " "),
 			CharsRaw:      len(raw),
 			CharsRendered: len(rendered),
+			CharsPrinted:  printed,
+			BaselineCmd:   "prisma " + strings.Join(args, " "),
+			YeetCmd:       "yeet prisma " + strings.Join(args, " "),
+			BaselineKind:  analytics.BaselineAsInvoked,
 			ExitCode:      result.ExitCode,
 			DurationMs:    time.Since(start).Milliseconds(),
 		}); err != nil {
