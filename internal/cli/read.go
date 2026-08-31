@@ -11,6 +11,7 @@ import (
 
 	"github.com/hdck007/yeet/internal/analytics"
 	"github.com/hdck007/yeet/internal/filter"
+	"github.com/hdck007/yeet/internal/readcache"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +23,7 @@ var (
 	readVerbose   int
 	readLines     string
 	readThreshold int
+	readNoCache   bool
 )
 
 var readCmd = &cobra.Command{
@@ -49,6 +51,7 @@ func init() {
 	readCmd.Flags().CountVarP(&readVerbose, "verbose", "v", "Verbose output (-v, -vv)")
 	readCmd.Flags().StringVar(&readLines, "lines", "", "Show only lines N-M (e.g. --lines 308-325), uses original line numbers")
 	readCmd.Flags().IntVar(&readThreshold, "threshold", 0, "Big-file warning threshold in lines (0 = YEET_BIG_FILE_THRESHOLD env var or default 150; -1 = disable)")
+	readCmd.Flags().BoolVar(&readNoCache, "no-cache", false, "Re-print the file even if this session was already shown it unchanged")
 	rootCmd.AddCommand(readCmd)
 }
 
@@ -56,7 +59,7 @@ func runRead(cmd *cobra.Command, args []string) error {
 	return runWithFallback("read", args, func() error {
 		return runReadImpl(args)
 	}, Fallback{
-		Bin: "cat",
+		Bin:  "cat",
 		Args: func(a []string) []string { return a },
 	})
 }
@@ -146,6 +149,19 @@ func runFile(filename string, level filter.FilterLevel, maxLines, tailLines int,
 
 	content := string(data)
 
+	// Re-read suppression. Routing reads through Bash loses the native Read
+	// tool's readFileState dedup, so an unchanged file is re-sent in full every
+	// time. Replay the same trick here: if this session was already shown an
+	// identical render of identical bytes, print a one-line pointer instead.
+	viewKey := readcache.ViewKey(readLevel, readLines, maxLines, tailLines, lineNumbers)
+	if !readNoCache {
+		if notice, hit := readcache.Lookup(filename, viewKey, data); hit {
+			fmt.Print(notice)
+			recordReadAnalytics(fmt.Sprintf("cat %s", filename), content, notice, start)
+			return nil
+		}
+	}
+
 	// --lines N-M: extract raw lines before any filtering, preserving original line numbers.
 	if readLines != "" {
 		extracted, err := extractLineRange(content, readLines)
@@ -159,6 +175,7 @@ func runFile(filename string, level filter.FilterLevel, maxLines, tailLines int,
 			fmt.Print(extracted)
 		}
 		recordReadAnalytics(fmt.Sprintf("cat %s", filename), content, extracted, start)
+		readcache.Record(filename, viewKey, data, extracted)
 		return nil
 	}
 
@@ -191,11 +208,24 @@ func runFile(filename string, level filter.FilterLevel, maxLines, tailLines int,
 			output := formatWithOriginalLineNums(nums, sigLines)
 			fmt.Print(output)
 			recordReadAnalytics(fmt.Sprintf("cat %s", filename), content, output, start)
+			readcache.Record(filename, viewKey, data, output)
 			return nil
 		}
-		// Language not supported for aggressive (e.g. binary/unknown) — show raw
-		fmt.Print(content)
-		recordReadAnalytics(fmt.Sprintf("cat %s", filename), content, content, start)
+		// No signature patterns for this language. Dumping the file raw used to
+		// happen here, which is the worst available answer: piped through the
+		// agent's shell it is capped at 30k characters (~7.5k tokens), whereas
+		// the native Read tool auto-paginates the same file at its 5k-token cap.
+		// Falling back to raw therefore costs *more* than not using yeet at all.
+		// Say so instead, and point at the cheaper options.
+		lineCount := strings.Count(content, "\n") + 1
+		fmt.Printf("yeet: no signature patterns for %s (%s). Aggressive filtering cannot help here.\n", filename, lang)
+		fmt.Printf("  1. Search first:     yeet grep \"<pattern>\" %s\n", filename)
+		fmt.Printf("  2. Targeted lines:   yeet read %s --lines N-M\n", filename)
+		fmt.Printf("  3. Strip comments:   yeet read %s -l moderate\n", filename)
+		if lineCount > 400 {
+			fmt.Printf("  Note: %d lines. Prefer the native Read tool for a whole-file view — it\n", lineCount)
+			fmt.Printf("        paginates at a token budget, while this path is capped mid-file by the shell.\n")
+		}
 		return nil
 	}
 
@@ -232,6 +262,7 @@ func runFile(filename string, level filter.FilterLevel, maxLines, tailLines int,
 
 	fmt.Print(output)
 	recordReadAnalytics(fmt.Sprintf("cat %s", filename), content, output, start)
+	readcache.Record(filename, viewKey, data, output)
 	return nil
 }
 
@@ -330,10 +361,10 @@ func applyLineWindow(content string, maxLines, tailLines int, lang filter.Langua
 		if tailLines == 0 {
 			return ""
 		}
-		
+
 		lines := strings.Split(content, "\n")
 		hasTrailingNewline := strings.HasSuffix(content, "\n")
-		
+
 		if hasTrailingNewline {
 			// Ignore the empty string resulting from the split after the final newline
 			lines = lines[:len(lines)-1]
