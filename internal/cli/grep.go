@@ -124,15 +124,15 @@ func runGrep(cmd *cobra.Command, args []string) error {
 		grepBaselineCmd = "grep " + strings.Join(grepArgs, " ")
 	}
 
-	rawOutput := result.Stdout
+	cmdOut := result.Stdout
 
-	if strings.TrimSpace(rawOutput) == "" {
+	if strings.TrimSpace(cmdOut) == "" {
 		if result.ExitCode == 2 && strings.TrimSpace(result.Stderr) != "" {
 			fmt.Fprintln(os.Stderr, strings.TrimSpace(result.Stderr))
 		}
 		msg := fmt.Sprintf("no matches for '%s'\n", pattern)
 		fmt.Print(msg)
-		trackAnalytics(start, args, rawOutput, msg, len(msg), result.ExitCode)
+		trackAnalytics(start, args, cmdOut, msg, len(msg), result.ExitCode)
 		return nil
 	}
 
@@ -145,7 +145,7 @@ func runGrep(cmd *cobra.Command, args []string) error {
 	fileMatches := make(map[string][]grepMatch)
 	total := 0
 
-	scanner := bufio.NewScanner(strings.NewReader(rawOutput))
+	scanner := bufio.NewScanner(strings.NewReader(cmdOut))
 	for scanner.Scan() {
 		line := scanner.Text()
 		parts := strings.SplitN(line, ":", 3)
@@ -209,8 +209,11 @@ func runGrep(cmd *cobra.Command, args []string) error {
 	rendered := buf.String()
 	// Never hand back more than the plain search would have. Grouping headers
 	// can outweigh the trimming on a small result set.
-	printed, _ := printBetterN(rawOutput, rendered)
-	trackAnalytics(start, args, rawOutput, rendered, printed, result.ExitCode)
+	if rawOutput {
+		rendered = cmdOut
+	}
+	printed, _ := printBetterN(cmdOut, rendered)
+	trackAnalytics(start, args, cmdOut, rendered, printed, result.ExitCode)
 	return nil
 }
 
@@ -437,7 +440,7 @@ var (
 	grepBaselineKind = analytics.BaselineAsInvoked
 )
 
-func trackAnalytics(start time.Time, args []string, rawOutput, rendered string, printed, exitCode int) {
+func trackAnalytics(start time.Time, args []string, cmdOut, rendered string, printed, exitCode int) {
 	if printed <= 0 {
 		printed = len(rendered)
 	}
@@ -445,7 +448,7 @@ func trackAnalytics(start time.Time, args []string, rawOutput, rendered string, 
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "grep",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      len(rawOutput),
+			CharsRaw:      len(cmdOut),
 			CharsRendered: len(rendered),
 			CharsPrinted:  printed,
 			BaselineCmd:   grepBaselineCmd,

@@ -179,3 +179,37 @@ func TestDedupPortMappings(t *testing.T) {
 		}
 	}
 }
+
+
+// The --raw flag is a package-level var set by a persistent flag in root.go. A
+// local variable of the same name shadows it and silently disables the flag:
+// grep.go declared `rawOutput := result.Stdout`, so `yeet grep --raw` returned
+// the condensed output anyway (11,152 bytes instead of the real 109,045).
+//
+// That matters because several renderers tell the reader to "re-run with --raw
+// for all". Advice that does nothing costs a turn, which is the single most
+// expensive thing yeet can do.
+func TestRawFlagIsNotShadowed(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join(".", "*.go"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "rawOutput :=") ||
+				strings.HasPrefix(trimmed, "rawOutput, ") && strings.Contains(trimmed, ":=") {
+				t.Errorf("%s:%d shadows the package-level rawOutput flag: %q\n"+
+					"a local of that name silently disables --raw for this command",
+					path, i+1, trimmed)
+			}
+		}
+	}
+}

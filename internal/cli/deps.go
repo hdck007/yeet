@@ -85,14 +85,14 @@ func runDeps(cmd *cobra.Command, args []string) error {
 			rawBuf.Write(d)
 		}
 	}
-	rawOutput := rawBuf.String()
-	improved := printBetter(rawOutput, rendered)
+	cmdOut := rawBuf.String()
+	improved := printBetter(cmdOut, rendered)
 
 	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "deps",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      len(rawOutput),
+			CharsRaw:      len(cmdOut),
 			CharsRendered: len(rendered),
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),

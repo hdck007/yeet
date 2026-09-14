@@ -159,19 +159,46 @@ ARM_SEL="$RUN_DIR/config-yeet-sel"
 mkdir -p "$ARM_SEL/hooks"
 cat > "$ARM_SEL/hooks/intercept.sh" <<'INTERCEPT'
 #!/usr/bin/env bash
+# Intercept a native tool call, answer it with yeet's condensed output, and hand
+# that back in the same turn (permissionDecision "deny" puts the reason in front
+# of the model, so no retry is needed).
+#
+# CRITICAL: only intercept when yeet can serve the request *faithfully*. The
+# first version ignored the tool's parameters and always ran a plain content
+# search. An agent asking for output_mode=files_with_matches got match content
+# instead, could not count files from it, and re-ran the search in Bash --
+# costing the extra turn the intercept was supposed to save. `yeet grep` has no
+# files-with-matches or count mode, so those fall through to the native tool.
 IN=$(cat)
 TOOL=$(echo "$IN" | jq -r '.tool_name // empty')
+PAT=$(echo "$IN"  | jq -r '.tool_input.pattern // empty')
+P=$(echo "$IN"    | jq -r '.tool_input.path // "."')
+MODE=$(echo "$IN" | jq -r '.tool_input.output_mode // "content"')
+GLOB=$(echo "$IN" | jq -r '.tool_input.glob // empty')
+HEAD=$(echo "$IN" | jq -r '.tool_input.head_limit // empty')
+[ -z "$PAT" ] && exit 0
+
 case "$TOOL" in
-  Grep) PAT=$(echo "$IN" | jq -r '.tool_input.pattern // empty')
-        P=$(echo "$IN" | jq -r '.tool_input.path // "."')
-        [ -z "$PAT" ] && exit 0
-        OUT=$(yeet grep "$PAT" "$P" 2>&1 | head -c 6000) ;;
-  Glob) PAT=$(echo "$IN" | jq -r '.tool_input.pattern // empty')
-        P=$(echo "$IN" | jq -r '.tool_input.path // "."')
-        [ -z "$PAT" ] && exit 0
-        OUT=$(yeet glob "$PAT" "$P" 2>&1 | head -c 6000) ;;
+  Grep)
+    # yeet grep only does content. Anything else must reach the real tool.
+    [ "$MODE" = "content" ] || exit 0
+    # No glob/type filter equivalent that is guaranteed faithful -> pass through.
+    [ -n "$GLOB" ] && exit 0
+    OUT=$(yeet grep "$PAT" "$P" 2>&1)
+    # Respect an explicit head_limit rather than silently returning more.
+    [ -n "$HEAD" ] && OUT=$(printf '%s' "$OUT" | head -n "$HEAD")
+    ;;
+  Glob)
+    OUT=$(yeet glob "$PAT" "$P" 2>&1)
+    ;;
   *) exit 0 ;;
 esac
+
+# If yeet produced nothing useful, let the native tool answer instead of
+# handing back an empty result the agent cannot act on.
+[ -z "$(printf '%s' "$OUT" | tr -d '[:space:]')" ] && exit 0
+
+OUT=$(printf '%s' "$OUT" | head -c 6000)
 jq -n --arg r "$OUT" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 INTERCEPT
 chmod +x "$ARM_SEL/hooks/intercept.sh"

@@ -137,15 +137,20 @@ func runFindImpl(args []string) error {
 	}
 
 	rendered := buf.String()
-	// Estimate raw: a typical `find` outputs full paths with metadata (~2x)
-	rawOutput := strings.Repeat("x", len(rendered)*2)
-	improved := printBetter(rawOutput, rendered)
+	// No native command is run for comparison here, so there is no measured
+	// baseline. This placeholder exists only so printBetter has something to
+	// compare against; it is NOT evidence of a saving, and the analytics row
+	// below is marked BaselineSynthetic so a fabricated 2x ratio is never
+	// reported as though it had been measured.
+	estBaseline := strings.Repeat("x", len(rendered)*2)
+	improved := printBetter(estBaseline, rendered)
 
 	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "find",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      len(rawOutput),
+			CharsRaw:      len(estBaseline),
+			BaselineKind:  analytics.BaselineSynthetic,
 			CharsRendered: len(rendered),
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),

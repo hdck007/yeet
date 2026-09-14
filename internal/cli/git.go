@@ -216,7 +216,7 @@ func runGit(cmd *cobra.Command, args []string) error {
 	// change state. The raw output of the run we just did *is* the native
 	// output, so it is the honest baseline.
 
-	printed, _ := printBetterNoteN(baselineOut, rendered, Note("git "+strings.Join(runArgs, " ")))
+	printed, _ := printBetterN(baselineOut, rendered)
 
 	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
