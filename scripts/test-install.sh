@@ -161,6 +161,12 @@ run_in_project() {
 }
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+# Hooks the installer ships today: Grep + Glob (intercept) and Bash (rewrite).
+# It used to ship 6 — five hard blocks on the native tools plus the Bash proxy.
+# The blocks were removed because each one cost the model a turn, and a turn is
+# worth far more than the bytes the block saved (docs/benchmark-live-ab.md).
+EXPECTED_HOOKS=3
+
 hook_count() {
   jq '[.hooks.PreToolUse[]? | select(._yeet == true)] | length' "$1" 2>/dev/null || echo -1
 }
@@ -277,7 +283,7 @@ t_install_fresh() {
   assert_file "$CLAUDE_DIR/CLAUDE.md"                  "CLAUDE.md written"
   assert_file "$DATA_D/install-manifest.json"          "manifest written"
 
-  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "6" "exactly 6 marked yeet hooks"
+  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "exactly $EXPECTED_HOOKS marked yeet hooks"
   assert_eq "$(head -1 "$CLAUDE_DIR/CLAUDE.md")" "@yeet-awareness.md" "CLAUDE.md leads with the awareness ref"
   assert_eq "$(jq -r '.autoCompactThreshold' "$CLAUDE_DIR/settings.json")" "100000" "autoCompactThreshold set"
   assert_eq "$(jq -r '(.permissions.allow // []) | index("Bash(yeet:*)") != null' "$CLAUDE_DIR/settings.json")" \
@@ -289,17 +295,34 @@ t_install_fresh() {
               "$CLAUDE_DIR/settings.json")" \
             "bash \"$CLAUDE_DIR/hooks/yeet-proxy.sh\"" "Bash hook points at the installed script"
 
-  # Every blocker must be a valid shell snippet that exits 2.
-  local n=0
-  for m in Read Glob Grep Write Edit; do
+  # The native tools must be left alone. Blocking them cost the model a turn per
+  # call, which is worth far more than the bytes a block saved -- the blocking
+  # configuration measured 58% worse than no yeet at all. If a future change
+  # reintroduces a blocker, this fails.
+  local blocked=0
+  for m in Read Write Edit; do
+    local n; n="$(jq -r --arg m "$m" \
+      '[.hooks.PreToolUse[]? | select(.matcher==$m)] | length' \
+      "$CLAUDE_DIR/settings.json")"
+    blocked=$((blocked + n))
+  done
+  assert_eq "$blocked" "0" "Read/Write/Edit are not hooked at all"
+  assert_eq "$(jq -r '[.hooks.PreToolUse[]? | select((.hooks[0].command // "") | test("BLOCKED"))] | length' \
+              "$CLAUDE_DIR/settings.json")" "0" "no BLOCKED-style hook survives"
+
+  # Grep and Glob are intercepted, not blocked: the hook answers the call with
+  # yeet output in the same turn, so it must be a runnable script, not exit 2.
+  local icept=0
+  for m in Grep Glob; do
     local cmd; cmd="$(jq -r --arg m "$m" \
       '[.hooks.PreToolUse[] | select(._yeet==true and .matcher==$m) | .hooks[0].command] | first' \
       "$CLAUDE_DIR/settings.json")"
-    if bash -n -c "$cmd" 2>/dev/null; then
-      bash -c "$cmd" 2>/dev/null; [ $? -eq 2 ] && n=$((n+1))
-    fi
+    case "$cmd" in *yeet-intercept.sh*) icept=$((icept+1)) ;; esac
   done
-  assert_eq "$n" "5" "all 5 blocker hooks are valid shell and exit 2"
+  assert_eq "$icept" "2" "Grep and Glob route to the intercept hook"
+  assert_file "$CLAUDE_DIR/hooks/yeet-intercept.sh" "intercept hook was installed"
+  bash -n "$CLAUDE_DIR/hooks/yeet-intercept.sh" 2>/dev/null
+  assert_eq "$?" "0" "intercept hook is valid shell"
 
   # No integration should have been installed for Copilot.
   assert_no_file "$COPILOT_DIR/copilot-instructions.md" "no Copilot files with --yes (Claude is the default)"
@@ -338,14 +361,14 @@ t_idempotent() {
   install_yeet --yes >/dev/null
   local out; out="$(install_yeet --yes)"
 
-  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "6" "still exactly 6 hooks after 3 installs"
-  assert_eq "$(any_yeet_hooks "$CLAUDE_DIR/settings.json")" "6" "no unmarked yeet hooks accumulated"
+  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "still exactly $EXPECTED_HOOKS hooks after 3 installs"
+  assert_eq "$(any_yeet_hooks "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "no unmarked yeet hooks accumulated"
   assert_eq "$(jq '(.permissions.allow // []) | length' "$CLAUDE_DIR/settings.json")" "1" \
             "permissions.allow not duplicated"
   assert_eq "$(grep -c '@yeet-awareness.md' "$CLAUDE_DIR/CLAUDE.md" | tr -d ' ')" "1" \
             "CLAUDE.md has exactly one awareness ref"
   assert_contains "$out" "previous install" "reports that it found the previous install"
-  assert_eq "$(jq '[.hooks.PreToolUse[]] | length' "$CLAUDE_DIR/settings.json")" "6" \
+  assert_eq "$(jq '[.hooks.PreToolUse[]] | length' "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" \
             "no orphaned hook entries at all"
 }
 
@@ -360,8 +383,8 @@ t_legacy_migration() {
 
   local out; out="$(install_yeet --yes)"
 
-  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "6" "6 marked hooks after migration"
-  assert_eq "$(any_yeet_hooks "$CLAUDE_DIR/settings.json")" "6" "no legacy unmarked hooks remain"
+  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "$EXPECTED_HOOKS marked hooks after migration"
+  assert_eq "$(any_yeet_hooks "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "no legacy unmarked hooks remain"
   assert_eq "$(jq '[.hooks.PreToolUse[] | select(.matcher=="Task")] | length' "$CLAUDE_DIR/settings.json")" \
             "1" "the user's own Task hook survived"
   assert_eq "$(jq -r '.model' "$CLAUDE_DIR/settings.json")" "opus" "unrelated settings keys survived"
@@ -606,7 +629,7 @@ t_no_auto_allow() {
   assert_eq "$(jq -r '(.permissions.allow // []) | index("Bash(yeet:*)")' "$CLAUDE_DIR/settings.json")" \
             "null" "Bash(yeet:*) not added"
   assert_eq "$(jq -r '.auto_allow' "$DATA_D/install-manifest.json")" "false" "manifest records auto_allow=false"
-  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "6" "hooks still installed"
+  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "hooks still installed"
 }
 
 t_copilot() {
@@ -706,7 +729,7 @@ t_manifest_shape() {
   assert_eq "$(jq -r '.binary.path' "$m")" "$BIN_DIR/yeet" "binary path recorded"
   assert_eq "$(jq -r '.claude.auto_compact_prior' "$m")" "7" "prior autoCompactThreshold recorded"
   assert_eq "$(jq -r '.claude.settings_existed' "$m")" "true" "notes that settings.json pre-existed"
-  assert_eq "$(jq -r '.claude.hook_count' "$m")" "6" "hook count recorded"
+  assert_eq "$(jq -r '.claude.hook_count' "$m")" "$EXPECTED_HOOKS" "hook count recorded"
   assert_eq "$(jq -r '.integrations | index("claude") != null' "$m")" "true" "integrations recorded"
   if [ -n "$(jq -r '.binary.sha256' "$m")" ]; then pass "binary sha256 recorded"; else fail "binary sha256 recorded"; fi
   # And the recorded prior value is what actually gets restored.
@@ -722,7 +745,7 @@ t_no_claude_dir() {
   install_yeet --yes >/dev/null; rc=$?
   assert_eq "$rc" "0" "install exits 0"
   assert_file "$CLAUDE_DIR/settings.json" "settings.json created from scratch"
-  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "6" "6 hooks in the new file"
+  assert_eq "$(hook_count "$CLAUDE_DIR/settings.json")" "$EXPECTED_HOOKS" "$EXPECTED_HOOKS hooks in the new file"
   uninstall_yeet --yes >/dev/null; rc=$?
   assert_eq "$rc" "0" "uninstall exits 0"
   assert_no_file "$CLAUDE_DIR/settings.json" "installer-created settings.json removed again"

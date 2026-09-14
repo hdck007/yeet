@@ -316,15 +316,23 @@ strip_yeet_hooks() {
   [ -f "$file" ] || return 0
   jq -e . "$file" >/dev/null 2>&1 || { warn "$file is not valid JSON — leaving it alone"; return 0; }
   removed="$(jq '
-    [ (.hooks.PreToolUse // [])[] | select(
-        ._yeet == true
-        or ((.matcher // "") as $m
-            | ($m | test("^(Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit)$"))
-              and ((.hooks // []) | map(.command // "") | any(test("yeet"))))
-        or ((.matcher // "") == "Bash"
-            and ((.hooks // []) | map(.command // "")
-                 | any(test("yeet-proxy|yeet-rewrite|yeet rewrite"))))
-      ) ] | length' "$file" 2>/dev/null || echo 0)"
+# is_yeet_entry -- true for any hook entry this project has ever installed.
+# Deliberately broad: a leftover PreToolUse hook pointing at a deleted
+# yeet-proxy.sh makes every Bash call fail, which bricks Claude Code for the
+# operator. A false negative is far worse than a false positive here, since a
+# false positive only drops a hook that invokes yeet.
+def is_yeet_entry:
+    (._yeet == true)
+    or (has("_yeetSchema"))
+    or ((.hooks // []) | map(.command // "") | any(
+          test("yeet[-_ ](proxy|intercept|rewrite)")
+        or test("[/]\\.?claude[/]hooks[/]yeet")
+        or test("[/]\\.yeet[/]")
+        or test("BLOCKED:.*yeet")
+        or test("(^|[^a-zA-Z0-9_])yeet[ ]+(read|grep|glob|ls|find|edit|write|smart|tree|diff|rewrite)")
+      ));
+    [ (.hooks // {}) | to_entries[] | .value[]? | select(is_yeet_entry) ] | length
+  ' "$file" 2>/dev/null || echo 0)"
   [ "${removed:-0}" -eq 0 ] && return 0
   backup_file "$file" >/dev/null
   if $DRY_RUN; then
@@ -333,18 +341,27 @@ strip_yeet_hooks() {
   fi
   tmp="$(mktemp)"
   jq '
-    if .hooks.PreToolUse then
-      .hooks.PreToolUse |= map(select(
-        (._yeet == true
-         or ((.matcher // "") as $m
-             | ($m | test("^(Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit)$"))
-               and ((.hooks // []) | map(.command // "") | any(test("yeet"))))
-         or ((.matcher // "") == "Bash"
-             and ((.hooks // []) | map(.command // "")
-                  | any(test("yeet-proxy|yeet-rewrite|yeet rewrite"))))) | not))
+# is_yeet_entry -- true for any hook entry this project has ever installed.
+# Deliberately broad: a leftover PreToolUse hook pointing at a deleted
+# yeet-proxy.sh makes every Bash call fail, which bricks Claude Code for the
+# operator. A false negative is far worse than a false positive here, since a
+# false positive only drops a hook that invokes yeet.
+def is_yeet_entry:
+    (._yeet == true)
+    or (has("_yeetSchema"))
+    or ((.hooks // []) | map(.command // "") | any(
+          test("yeet[-_ ](proxy|intercept|rewrite)")
+        or test("[/]\\.?claude[/]hooks[/]yeet")
+        or test("[/]\\.yeet[/]")
+        or test("BLOCKED:.*yeet")
+        or test("(^|[^a-zA-Z0-9_])yeet[ ]+(read|grep|glob|ls|find|edit|write|smart|tree|diff|rewrite)")
+      ));
+    # Sweep every hook event, not only PreToolUse: older installers also wrote
+    # PostToolUse and SessionStart entries that later versions never cleaned up.
+    if (.hooks | type) == "object" then
+      .hooks |= with_entries(.value |= map(select(is_yeet_entry | not)))
+      | .hooks |= with_entries(select((.value | length) > 0))
     else . end
-    | if (.hooks.PreToolUse? | type == "array") and (.hooks.PreToolUse | length) == 0
-      then del(.hooks.PreToolUse) else . end
     | if (.hooks? | type == "object") and (.hooks | length) == 0
       then del(.hooks) else . end
   ' "$file" > "$tmp" && mv "$tmp" "$file"
@@ -546,6 +563,7 @@ CL_MD_EXISTED=false
 CL_MD_BACKUP=""
 CL_AWARENESS="$CLAUDE_HOME/yeet-awareness.md"
 CL_PROXY="$CLAUDE_HOME/hooks/yeet-proxy.sh"
+CL_INTERCEPT="$CLAUDE_HOME/hooks/yeet-intercept.sh"
 CL_HOOK_COUNT=0
 CREATED_FILES=""
 CREATED_DIRS=""
@@ -591,18 +609,30 @@ strip_yeet_block() {
 }
 
 # The hook block, built with jq so quoting is never hand-rolled.
+#
+# yeet no longer blocks Read/Write/Edit/Grep/Glob. It used to reject all five
+# with "BLOCKED: use yeet ... instead", forcing the model to reformulate every
+# call as a Bash command. That costs a turn, and a turn is the most expensive
+# thing yeet can cause: in a live A/B a turn was worth ~32,000 billed input
+# tokens (every turn re-sends the accumulated context) while condensing every
+# tool result in a whole run saved ~1,900. The blocking set measured 58% worse
+# than running with no yeet at all. See docs/benchmark-live-ab.md.
+#
+#   Read / Write / Edit  left alone: native Read already takes offset+limit, a
+#                        partially read file can still be edited, and
+#                        "yeet read --lines A-B" is byte-identical to sed.
+#   Grep / Glob          intercepted, not blocked: the hook answers in the SAME
+#                        turn and passes through when yeet cannot serve the
+#                        request faithfully.
+#   Bash                 rewritten by the proxy, unchanged.
 yeet_hooks_json() {
-  jq -n --arg cmd "bash \"$CL_PROXY\"" --argjson schema "$INSTALLER_SCHEMA" '
-    def block(msg): {"type":"command","command":("echo " + (msg|@sh) + " >&2; exit 2")};
-    def entry(m; msg): {"matcher":m, "_yeet":true, "_yeetSchema":$schema, "hooks":[block(msg)]};
+  jq -n --arg cmd "bash \"$CL_PROXY\"" --arg icept "bash \"$CL_INTERCEPT\"" \
+        --argjson schema "$INSTALLER_SCHEMA" '
+    def hook(c): {"type":"command","command":c};
     [
-      entry("Read";  "BLOCKED: Use `yeet read <file>` (or `yeet smart <file>`) instead of the Read tool."),
-      entry("Glob";  "BLOCKED: Use `yeet glob \"<pattern>\" [path]` instead of the Glob tool."),
-      entry("Grep";  "BLOCKED: Use `yeet grep \"<pattern>\" [path]` instead of the Grep tool."),
-      entry("Write"; "BLOCKED: Use `cat <<'"'"'EOF'"'"' | yeet write <file>` instead of the Write tool."),
-      entry("Edit";  "BLOCKED: Use `yeet edit <file> --old \"...\" --new \"...\"` instead of the Edit tool."),
-      {"matcher":"Bash", "_yeet":true, "_yeetSchema":$schema,
-       "hooks":[{"type":"command","command":$cmd}]}
+      {"matcher":"Grep", "_yeet":true, "_yeetSchema":$schema, "hooks":[hook($icept)]},
+      {"matcher":"Glob", "_yeet":true, "_yeetSchema":$schema, "hooks":[hook($icept)]},
+      {"matcher":"Bash", "_yeet":true, "_yeetSchema":$schema, "hooks":[hook($cmd)]}
     ]'
 }
 
@@ -619,6 +649,11 @@ if $DO_CLAUDE; then
   _chmodx "$CL_PROXY"
   add_created_file "$CL_PROXY"
   ok "Proxy hook → $CL_PROXY"
+
+  fetch_asset "hooks/yeet-intercept.sh" "$CL_INTERCEPT"
+  _chmodx "$CL_INTERCEPT"
+  add_created_file "$CL_INTERCEPT"
+  ok "Intercept hook → $CL_INTERCEPT"
 
   # 6b. awareness instructions (always refreshed so upgrades stay current)
   fetch_asset "hooks/claude/yeet-awareness.md" "$CL_AWARENESS"
