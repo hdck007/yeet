@@ -484,29 +484,26 @@ func TestRenderGitLog_TrulyEmptyStillSaysNoCommits(t *testing.T) {
 	}
 }
 
-// The flags that collide with yeet's --pretty must be stripped before the run.
-func TestDropLogFormatFlags(t *testing.T) {
+// A caller who pins the output shape must get that shape. Stripping the flag and
+// imposing yeet's layout returns something they did not ask for, and they re-run
+// to get it -- one live A/B run spent three turns on a single `git log` for
+// exactly this reason.
+func TestHasLogFormatFlag(t *testing.T) {
 	cases := []struct {
 		in   []string
-		want []string
+		want bool
 	}{
-		{[]string{"-3", "--oneline", "--", "f.js"}, []string{"-3", "--", "f.js"}},
-		{[]string{"--pretty=format:%h", "-5"}, []string{"-5"}},
-		{[]string{"--format=%s"}, []string{}},
-		{[]string{"--graph", "--oneline"}, []string{}},
-		{[]string{"-3", "--", "f.js"}, []string{"-3", "--", "f.js"}},
+		{[]string{"-3", "--oneline", "--", "f.js"}, true},
+		{[]string{"--pretty=format:%h", "-5"}, true},
+		{[]string{"--format=%s"}, true},
+		{[]string{"--graph"}, true},
+		{[]string{"-3", "--", "f.js"}, false},
+		{[]string{}, false},
+		{[]string{"-5", "--no-merges"}, false},
 	}
 	for _, c := range cases {
-		got := dropLogFormatFlags(c.in)
-		if len(got) != len(c.want) {
-			t.Errorf("dropLogFormatFlags(%v) = %v; want %v", c.in, got, c.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != c.want[i] {
-				t.Errorf("dropLogFormatFlags(%v) = %v; want %v", c.in, got, c.want)
-				break
-			}
+		if got := hasLogFormatFlag(c.in); got != c.want {
+			t.Errorf("hasLogFormatFlag(%v) = %v; want %v", c.in, got, c.want)
 		}
 	}
 }

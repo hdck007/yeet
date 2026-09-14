@@ -25,6 +25,7 @@ KEEP=false
 YES=false
 YEET_BIN=""
 ARMS_OPT=""
+WARMUP=2
 TARGET_REPO="https://github.com/eslint/eslint.git"
 TARGET_SHA="24310e3a0e22b3c086ca402f88448676f2e1cfcd"
 CLONE_DEPTH=200
@@ -51,6 +52,7 @@ while [ $# -gt 0 ]; do
     --target-sha)  TARGET_SHA="$2"; shift ;;
     --yeet-bin)    YEET_BIN="$2"; shift ;;
     --arms)        ARMS_OPT="$2"; shift ;;
+    --warmup)      WARMUP="$2"; shift ;;
     --keep)      KEEP=true ;;
     -y|--yes)    YES=true ;;
     -h|--help)   sed -n '2,20p' "$0"; exit 0 ;;
@@ -210,6 +212,20 @@ jq --arg h "bash \"$ARM_SEL/hooks/intercept.sh\"" '
   "$ARM_YEET/settings.json" > "$ARM_SEL/settings.json" 2>/dev/null
 ok "yeet-sel arm: Bash rewrite + Grep/Glob intercept-and-return; Read/Write/Edit unblocked"
 
+# rtk arm — the tool yeet is modelled on, for an external reference point. Its
+# `rtk hook claude` processor rewrites Bash and passes the native tools through,
+# which is the same shape yeet-sel now ships.
+ARM_RTK="$RUN_DIR/config-rtk"
+mkdir -p "$ARM_RTK"
+if command -v rtk >/dev/null 2>&1; then
+  jq -n '{hooks:{PreToolUse:[{matcher:"Bash",hooks:[{type:"command",command:"rtk hook claude"}]}]}}' \
+    > "$ARM_RTK/settings.json"
+  ok "rtk arm: $(rtk --version 2>/dev/null | head -1) via 'rtk hook claude'"
+else
+  echo '{}' > "$ARM_RTK/settings.json"
+  warn "rtk not installed — the rtk arm would measure nothing"
+fi
+
 # ─── Stream extractors ────────────────────────────────────────────────────────
 final_text() { jq -r 'select(.type=="result") | .result // empty' "$1" 2>/dev/null; }
 bash_cmds()  { jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use")
@@ -260,6 +276,7 @@ run_arm() {
     yeet)      cfg="$ARM_YEET";  data="$DATA_YEET" ;;
     yeet-bash) cfg="$ARM_YBASH"; data="$RUN_DIR/data-ybash" ;;
     yeet-sel)  cfg="$ARM_SEL";   data="$RUN_DIR/data-ysel" ;;
+    rtk)       cfg="$ARM_RTK";   data="$RUN_DIR/data-rtk" ;;
     *)         cfg="$ARM_NATIVE"; data="$RUN_DIR/data-native" ;;
   esac
   mkdir -p "$data"
@@ -289,6 +306,8 @@ run_arm() {
       args+=(--settings "$ARM_YBASH/settings.json") ;;
     yeet-sel)
       args+=(--settings "$ARM_SEL/settings.json") ;;
+    rtk)
+      args+=(--settings "$ARM_RTK/settings.json") ;;
   esac
 
   start="$(date +%s)"
@@ -318,12 +337,13 @@ run_arm() {
 # ─── Confirm ──────────────────────────────────────────────────────────────────
 ARMS="${ARMS_OPT:-native yeet yeet-bash yeet-sel}"
 N_ARMS=$(echo $ARMS | wc -w | tr -d " ")
-TOTAL_RUNS=$((REPS * N_ARMS))
+TOTAL_RUNS=$((REPS * N_ARMS + WARMUP))
 say ""
 say "${BOLD}  yeet simulation benchmark${RESET}"
 say "  ${DIM}target:  $TARGET_REPO @ ${ACTUAL_SHA:0:9} ($N_FILES files)${RESET}"
 say "  ${DIM}model:   ${MODEL:-<default>}${RESET}"
 say "  ${DIM}runs:    $TOTAL_RUNS ($REPS per arm, alternating)${RESET}"
+  say "  ${DIM}warmup:  $WARMUP discarded session(s) before measuring${RESET}"
 say "  ${DIM}workload: search -> read -> edit -> git -> npm (dry-run)${RESET}"
 say "  ${DIM}reports: $RUN_DIR${RESET}"
 say "  ${DIM}your ~/.claude is not touched${RESET}"
@@ -334,6 +354,27 @@ if ! $YES; then
   REPLY=""
   if [ -t 0 ]; then read -r REPLY; elif [ -e /dev/tty ]; then read -r REPLY </dev/tty; fi
   case "${REPLY:-N}" in [Yy]|[Yy][Ee][Ss]) ;; *) say "  Aborted."; exit 0 ;; esac
+fi
+
+# ─── Warm the prompt cache ────────────────────────────────────────────────────
+# Measured on 2026-09-14: the first three sessions of a fresh benchmark reported
+# cache_creation of 31,868 / 27,205 / 10,355 and then settled at ~9,000 for every
+# session after. That ramp is a property of the cache, not of the arm under test,
+# and whichever arm draws an early slot is charged for it. Rotating the arms
+# spreads the distortion evenly but leaves it in the numbers, so the first runs
+# are executed and thrown away instead.
+if [ "${WARMUP:-0}" -gt 0 ]; then
+  say ""
+  info "Warming the prompt cache with $WARMUP discarded session(s)..."
+  for w in $(seq 1 "$WARMUP"); do
+    printf "  ${DIM}warmup %s/%s ${RESET}" "$w" "$WARMUP"
+    run_arm "native" "warm$w" >/dev/null 2>&1
+    cc="$(jq -s -r '([.[]|select(.type=="result")]|last).usage.cache_creation_input_tokens // 0' \
+          "$RUN_DIR/native-repwarm$w.jsonl" 2>/dev/null || echo 0)"
+    printf "${DIM}cache_create=%s (discarded)${RESET}\n" "$cc"
+    rm -f "$RUN_DIR"/native-repwarm$w.* 2>/dev/null
+  done
+  ok "cache warm — measurement starts here"
 fi
 
 # ─── Execute ──────────────────────────────────────────────────────────────────
@@ -357,7 +398,11 @@ for rep in $(seq 1 "$REPS"); do
     FINAL="$(final_text "$STREAM")"
 
     STATUS="ok"; NOTE=""
-    if [ "$arm" = "native" ] && uses_yeet "$STREAM"; then
+    if [ "$arm" = "rtk" ]; then
+      if bash_cmds "$STREAM" | grep -qE '"'"'(^|[|;&] *)yeet '"'"'; then
+        STATUS="impure"; NOTE="yeet used in the rtk arm"
+      fi
+    elif [ "$arm" = "native" ] && uses_yeet "$STREAM"; then
       STATUS="impure"; NOTE="yeet used in the native arm"
     elif [ "$arm" != "native" ] && ! uses_yeet "$STREAM"; then
       STATUS="impure"; NOTE="yeet never used in the $arm arm"
@@ -469,7 +514,10 @@ MD="$RUN_DIR/report.md"
   echo "- Target: \`$TARGET_REPO\` @ \`$ACTUAL_SHA\` ($N_FILES tracked files)"
   echo "- Model: \`${MODEL:-default}\`"
   echo "- yeet binary under test: \`$YEET_VER\` from \`$YEET_BIN\`"
-  echo "- Reps per arm: $REPS (alternating order), max turns $MAX_TURNS"
+  echo "- Reps per arm: $REPS (rotating order), max turns $MAX_TURNS"
+  echo "- Warmup: $WARMUP session(s) run and discarded first — the prompt cache takes"
+  echo "  a few sessions to settle, and until it does cache_creation is inflated by an"
+  echo "  amount unrelated to the arm under test."
   echo "- Workload: search → read → edit → git → npm (dry-run), one mixed session"
   echo "- Every run got a pristine copy of the target at the identical path \`$WORK\`"
   echo "- Arms: yeet = \`--settings <installed settings.json>\` (6 PreToolUse hooks) + awareness via \`--append-system-prompt\`; native = neither"

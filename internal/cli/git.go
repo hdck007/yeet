@@ -261,10 +261,18 @@ func planGit(sub string, rest []string) *gitPlan {
 			render:       func(raw string) string { return renderGitNumstat(raw, "diff") },
 		}
 	case "log":
-		// A caller-supplied --oneline/--pretty/--format overrides the layout
-		// renderGitLog parses, so strip them; the baseline keeps the caller's
-		// original flags so the measurement stays honest.
-		rest = dropLogFormatFlags(rest)
+		// An explicit --pretty/--format/--oneline is a request for a specific
+		// shape. Stripping it and imposing yeet's own layout silently returns
+		// something the caller did not ask for, and they re-run to get it: in a
+		// live A/B the agent spent three turns on one `git log` because the
+		// format it asked for never came back. Hand those straight to git.
+		if hasLogFormatFlag(rest) {
+			return &gitPlan{
+				runArgs:      append([]string{"log"}, rest...),
+				baselineArgs: nil,
+				render:       func(raw string) string { return raw },
+			}
+		}
 		return &gitPlan{
 			runArgs:      append([]string{"log", "--pretty=format:%h|%an|%ar|%s", "--no-merges"}, rest...),
 			baselineArgs: append([]string{"log"}, rest...),
@@ -568,22 +576,21 @@ func parseCount(s string) int {
 	return n
 }
 
-// dropLogFormatFlags removes caller flags that would override the --pretty
-// layout renderGitLog depends on. Without this, `git log --oneline` produced
-// output with no "|" separators, every line was skipped, and the renderer
-// reported "no commits" for a file that had them.
-func dropLogFormatFlags(args []string) []string {
-	out := make([]string, 0, len(args))
+// hasLogFormatFlag reports whether the caller pinned the output shape. When they
+// have, `git log` is passed through unrendered: renderGitLog parses yeet's own
+// --pretty layout, so imposing it would both break the parser (which is how
+// `git log --oneline` came to report "no commits" for a file that had two) and
+// return a shape the caller did not ask for.
+func hasLogFormatFlag(args []string) bool {
 	for _, a := range args {
 		switch {
 		case a == "--oneline", a == "--graph":
-			continue
+			return true
 		case strings.HasPrefix(a, "--pretty"), strings.HasPrefix(a, "--format"):
-			continue
+			return true
 		}
-		out = append(out, a)
 	}
-	return out
+	return false
 }
 
 func renderGitLog(raw string) string {

@@ -206,9 +206,11 @@ to `yeet` equivalents before they run.
 > time. A turn is the most expensive thing yeet can cause: re-sending the accumulated
 > context is expensive, while condensing every tool result in an entire session
 > recovers comparatively little. Measured end to end on real API cost, the blocking
-> configuration cost **35% more** than running with no yeet at all, while the current
-> hook set came in **6% cheaper** than no yeet in the same head-to-head run.
-> See [docs/benchmark-live-ab.md](docs/benchmark-live-ab.md).
+> configuration cost **35% more** than running with no yeet at all — it ran 16 turns
+> where no-yeet ran 11. The current hook set shows **no measurable difference** from
+> running without yeet on that workload; the benchmark's run-to-run noise is larger
+> than the effect. See [docs/benchmark-live-ab.md](docs/benchmark-live-ab.md) for the
+> method, the noise floor, and what it can and cannot resolve.
 
 ### Option A — Project-level (this repo only)
 

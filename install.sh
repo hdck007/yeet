@@ -616,8 +616,9 @@ strip_yeet_block() {
 # thing yeet can cause: in a live A/B a turn was worth ~32,000 billed input
 # tokens (every turn re-sends the accumulated context) while condensing every
 # tool result in a whole run recovers little. On real API cost the blocking set
-# measured 35% MORE expensive than running with no yeet at all, while this hook
-# set came in 6% cheaper head-to-head. See docs/benchmark-live-ab.md.
+# measured 35% MORE expensive than no yeet at all -- 16 turns against 11. This
+# hook set shows no measurable difference from no yeet on that workload; the
+# benchmark noise exceeds the effect. See docs/benchmark-live-ab.md.
 #
 #   Read / Write / Edit  left alone: native Read already takes offset+limit, a
 #                        partially read file can still be edited, and
