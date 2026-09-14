@@ -101,6 +101,21 @@ func printBetter(raw, filtered string) bool {
 // stdout. Callers must record that number rather than the length of the
 // filtered string: when the fallback fires, the model received the raw output,
 // and logging the filtered length would book a saving that never happened.
+// printBetterNoteN is printBetterN with an explanatory note prepended to the
+// condensed form. The note is counted in the comparison, so the "never worse
+// than raw" guarantee still holds: if note+filtered is not smaller than raw,
+// the raw output is printed and no note is emitted. Without this the note could
+// push a small condensed result past the raw one and silently disable filtering.
+func printBetterNoteN(raw, filtered, note string) (printed int, shorter bool) {
+	withNote := note + filtered
+	if len(withNote) < len(raw) {
+		fmt.Print(withNote)
+		return len(withNote), true
+	}
+	fmt.Print(raw)
+	return len(raw), false
+}
+
 func printBetterN(raw, filtered string) (printed int, shorter bool) {
 	if len(filtered) < len(raw) {
 		fmt.Print(filtered)

@@ -4,9 +4,10 @@ import (
 	"testing"
 )
 
-// openTemp gives each test its own database. YEET_DATA_DIR is set explicitly
-// rather than relying on HOME, so an inherited YEET_DATA_DIR cannot make these
-// tests share a store or write into the real analytics history.
+// openTemp gives each test its own database. Both YEET_DATA_DIR and HOME are
+// set: YEET_DATA_DIR is what dbFilePath honours, HOME is the fallback, so
+// neither an inherited env var nor the real home directory can make these tests
+// share a store or write into the real analytics history.
 func openTemp(t *testing.T) *DB {
 	t.Helper()
 	dir := t.TempDir()

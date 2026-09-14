@@ -162,6 +162,14 @@ ok "yeet arm: $(jq '[.hooks.PreToolUse[] | select(._yeet==true)] | length' "$ARM
 echo '{}' > "$ARM_NATIVE/settings.json"
 ok "native arm: no hooks, no awareness"
 
+# Ambient user settings are still read for auth, so the native arm is only clean
+# if the real config has no hooks of its own. Check rather than assume.
+_amb="$(jq '[.hooks.PreToolUse[]?] | length' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" 2>/dev/null || echo 0)"
+if [ "${_amb:-0}" -gt 0 ]; then
+  die "your real Claude config has $_amb PreToolUse hook(s); they would contaminate the native arm.
+     Remove them (or run yeet-uninstall) before benchmarking."
+fi
+
 # ─── Runner ───────────────────────────────────────────────────────────────────
 run_arm() {
   # run_arm <arm> <rep> ; writes <stream>.jsonl, echoes "tokens_in tokens_out cache_w cache_r turns cost secs"
@@ -172,23 +180,34 @@ run_arm() {
   stream="$RUN_DIR/$arm-rep$rep.jsonl"
 
   local -a args
+  # Auth lives in the real config dir. Overriding CLAUDE_CONFIG_DIR to an empty
+  # throwaway makes every session fail with "Not logged in · Please run /login",
+  # so the arm is expressed with --settings instead and the real dir is only read.
+  #
+  # --dangerously-skip-permissions and --permission-mode bypassPermissions are
+  # both silently ignored in some hosts (the init event still reports
+  # permissionMode "default") and every Bash call is then denied. An explicit
+  # --allowedTools list is honoured, so use that.
   args=(--print --output-format stream-json --verbose
         --max-turns "$MAX_TURNS"
-        --dangerously-skip-permissions
-        --setting-sources user
+        --allowedTools Bash Read Grep Glob Edit Write
         --add-dir "$TARGET")
   [ -n "$MODEL" ] && args+=(--model "$MODEL")
+  if [ "$arm" = "yeet" ]; then
+    args+=(--settings "$ARM_YEET/settings.json")
+    [ -s "$ARM_YEET/yeet-awareness.md" ] && \
+      args+=(--append-system-prompt "$(cat "$ARM_YEET/yeet-awareness.md")")
+  fi
 
   start="$(date +%s)"
   printf '%s' "$TASK" | env \
-    CLAUDE_CONFIG_DIR="$cfg" \
     YEET_DATA_DIR="$data" \
     claude "${args[@]}" > "$stream" 2>"$RUN_DIR/$arm-rep$rep.err" || true
   end="$(date +%s)"
 
   # The result event carries the authoritative usage totals.
   local u
-  u="$(jq -s '
+  u="$(jq -s -r '
     ( [ .[] | select(.type=="result") ] | last ) as $r
     | ($r.usage // {}) as $usage
     | {

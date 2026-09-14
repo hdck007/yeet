@@ -32,10 +32,21 @@ var gitCmd = &cobra.Command{
 	RunE:               runGit,
 }
 
-// gitDiffContent shows the changed lines, not just which files changed. Off by
-// default: the per-file summary is what an agent needs to decide where to look,
-// and the hunks are what make a raw diff expensive.
-var gitDiffContent bool
+// gitDiffContent shows the changed lines, not just which files changed. ON by
+// default.
+//
+// This used to default to off, on the theory that "the per-file summary is what
+// an agent needs to decide where to look". Measurement contradicted that: in a
+// 12-session A/B on the eslint tree, agents that asked for a diff and received
+// only a numstat summary re-ran `command git diff` to bypass yeet and see the
+// hunks. Each bypass cost a turn (~32k billed input tokens, since every turn
+// re-sends the accumulated context) to avoid ~200 bytes of hunk. The run with
+// zero bypasses tied the no-yeet baseline exactly; the runs with bypasses lost
+// by 24-58%. A diff without hunks is not a diff, and the agent correctly
+// refuses to trust it.
+//
+// Use --no-content (or --stat) for the old summary-only behaviour.
+var gitDiffContent = true
 
 func init() {
 	rootCmd.AddCommand(gitCmd)
@@ -131,11 +142,15 @@ func runGit(cmd *cobra.Command, args []string) error {
 	start := time.Now()
 
 	args = stripYeetFlags(args)
-	gitDiffContent = false
+	gitDiffContent = true
 	filtered := make([]string, 0, len(args))
 	for _, a := range args {
 		if a == "--content" || a == "--patch-content" {
 			gitDiffContent = true
+			continue
+		}
+		if a == "--no-content" || a == "--stat" {
+			gitDiffContent = false
 			continue
 		}
 		filtered = append(filtered, a)
@@ -201,7 +216,7 @@ func runGit(cmd *cobra.Command, args []string) error {
 	// change state. The raw output of the run we just did *is* the native
 	// output, so it is the honest baseline.
 
-	printed, _ := printBetterN(baselineOut, rendered)
+	printed, _ := printBetterNoteN(baselineOut, rendered, Note("git "+strings.Join(runArgs, " ")))
 
 	if !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
@@ -246,6 +261,10 @@ func planGit(sub string, rest []string) *gitPlan {
 			render:       func(raw string) string { return renderGitNumstat(raw, "diff") },
 		}
 	case "log":
+		// A caller-supplied --oneline/--pretty/--format overrides the layout
+		// renderGitLog parses, so strip them; the baseline keeps the caller's
+		// original flags so the measurement stays honest.
+		rest = dropLogFormatFlags(rest)
 		return &gitPlan{
 			runArgs:      append([]string{"log", "--pretty=format:%h|%an|%ar|%s", "--no-merges"}, rest...),
 			baselineArgs: append([]string{"log"}, rest...),
@@ -549,6 +568,24 @@ func parseCount(s string) int {
 	return n
 }
 
+// dropLogFormatFlags removes caller flags that would override the --pretty
+// layout renderGitLog depends on. Without this, `git log --oneline` produced
+// output with no "|" separators, every line was skipped, and the renderer
+// reported "no commits" for a file that had them.
+func dropLogFormatFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		switch {
+		case a == "--oneline", a == "--graph":
+			continue
+		case strings.HasPrefix(a, "--pretty"), strings.HasPrefix(a, "--format"):
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 func renderGitLog(raw string) string {
 	var b strings.Builder
 	n := 0
@@ -562,6 +599,13 @@ func renderGitLog(raw string) string {
 		fmt.Fprintf(&b, "%s %s (%s) %s\n", f[0], f[3], f[2], shortName(f[1]))
 	}
 	if n == 0 {
+		// Returning "no commits" here would be a false negative: git printed
+		// something we could not parse (a caller-supplied --oneline/--pretty
+		// overrides the layout this parser expects). Hand back the raw output
+		// so the never-worse comparison prints git's own answer instead.
+		if strings.TrimSpace(raw) != "" {
+			return raw
+		}
 		return "no commits\n"
 	}
 	return fmt.Sprintf("%d commits:\n", n) + b.String()

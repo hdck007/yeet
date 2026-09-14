@@ -29,7 +29,7 @@ func TestEveryRewriteReachableRendererIsGuarded(t *testing.T) {
 	//           That row is already labelled synthetic for the same reason.
 	reachable := []string{
 		"ls", "find", "diff", "git", "gh",
-		"ps", "du", "kubectl", "docker",
+		"ps", "du", "kubectl", "docker", "tree", "env",
 		"vitest", "tsc", "lint", "playwright", "prettier", "prisma", "next",
 		"npm", "pkgmanager",
 	}
@@ -41,7 +41,11 @@ func TestEveryRewriteReachableRendererIsGuarded(t *testing.T) {
 			continue
 		}
 		body := string(src)
-		if !strings.Contains(body, "printBetterN(") && !strings.Contains(body, "printBetter(") {
+		// printBetterNoteN is printBetterN plus an explanatory note, with the
+		// note counted in the comparison, so it upholds the same invariant.
+		if !strings.Contains(body, "printBetterN(") &&
+			!strings.Contains(body, "printBetter(") &&
+			!strings.Contains(body, "printBetterNoteN(") {
 			t.Errorf("%s prints without comparing against the raw output; a rendering "+
 				"longer than the command's own output would be sent to the model", path)
 		}

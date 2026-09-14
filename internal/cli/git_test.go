@@ -457,3 +457,71 @@ func TestGitBranchMutates(t *testing.T) {
 		}
 	}
 }
+
+
+// ─── regressions found by the live A/B benchmark ──────────────────────────────
+
+// renderGitLog parses yeet's own --pretty layout. A caller-supplied --oneline
+// overrode it, every line failed the 4-field split, and the renderer reported
+// "no commits" for a file that had them. A wrong answer is worse than a verbose
+// one: the agent that hit this spent five turns re-running git to get the truth.
+func TestRenderGitLog_UnparsableRawIsNotReportedAsNoCommits(t *testing.T) {
+	// What `git log --oneline` actually prints: no "|" separators.
+	raw := "677214e fix: handle ASI hazards (#20935)\n3eb3d9b docs: Update README\n"
+	got := renderGitLog(raw)
+	if strings.Contains(got, "no commits") {
+		t.Errorf("renderGitLog(%q) = %q; must not claim \"no commits\" when git printed output", raw, got)
+	}
+	if !strings.Contains(got, "677214e") {
+		t.Errorf("renderGitLog(%q) = %q; want the raw commits preserved", raw, got)
+	}
+}
+
+// Genuinely empty history is still reported as such.
+func TestRenderGitLog_TrulyEmptyStillSaysNoCommits(t *testing.T) {
+	if got := renderGitLog(""); got != "no commits\n" {
+		t.Errorf("renderGitLog(\"\") = %q; want \"no commits\\n\"", got)
+	}
+}
+
+// The flags that collide with yeet's --pretty must be stripped before the run.
+func TestDropLogFormatFlags(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want []string
+	}{
+		{[]string{"-3", "--oneline", "--", "f.js"}, []string{"-3", "--", "f.js"}},
+		{[]string{"--pretty=format:%h", "-5"}, []string{"-5"}},
+		{[]string{"--format=%s"}, []string{}},
+		{[]string{"--graph", "--oneline"}, []string{}},
+		{[]string{"-3", "--", "f.js"}, []string{"-3", "--", "f.js"}},
+	}
+	for _, c := range cases {
+		got := dropLogFormatFlags(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("dropLogFormatFlags(%v) = %v; want %v", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("dropLogFormatFlags(%v) = %v; want %v", c.in, got, c.want)
+				break
+			}
+		}
+	}
+}
+
+// A diff without hunks is not a diff. This defaulted to a numstat summary, so
+// agents re-ran `command git diff` to see what changed — a turn costs far more
+// than the hunks it saves.
+func TestGitDiff_ShowsContentByDefault(t *testing.T) {
+	gitDiffContent = true // package default; pinned here so a flip is caught
+	if !gitDiffContent {
+		t.Fatal("gitDiffContent must default to true")
+	}
+	raw := "diff --git a/f.js b/f.js\n--- a/f.js\n+++ b/f.js\n@@ -1,0 +1,1 @@\n+// added\n"
+	got := renderGitDiffContent(raw)
+	if !strings.Contains(got, "+// added") {
+		t.Errorf("renderGitDiffContent(%q) = %q; want the changed line present", raw, got)
+	}
+}
