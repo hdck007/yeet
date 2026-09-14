@@ -42,7 +42,7 @@ var gitCmd = &cobra.Command{
 // hunks. Each bypass cost a turn (~32k billed input tokens, since every turn
 // re-sends the accumulated context) to avoid ~200 bytes of hunk. The run with
 // zero bypasses tied the no-yeet baseline exactly; the runs with bypasses lost
-// by 24-58%. A diff without hunks is not a diff, and the agent correctly
+// on cost. A diff without hunks is not a diff, and the agent correctly
 // refuses to trust it.
 //
 // Use --no-content (or --stat) for the old summary-only behaviour.

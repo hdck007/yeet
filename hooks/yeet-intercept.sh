@@ -8,9 +8,9 @@
 #
 # Why not just block, as yeet used to? A blocked tool costs a turn — the model
 # must reformulate the call as `yeet grep ...` in Bash. In a 12-session A/B a
-# turn cost ~32,000 billed input tokens (every turn re-sends the accumulated
-# context), while condensing every tool result in a whole run saved ~1,900. The
-# blocking configuration measured 58% WORSE than using no yeet at all.
+# turn re-sends the accumulated context, which costs far more than condensing
+# every tool result in a whole run recovers. On real API cost the blocking
+# configuration measured 35% MORE expensive than using no yeet at all.
 #
 # The rule this file follows: only intercept when yeet can serve the request
 # faithfully. Anything else exits 0 and lets the native tool run. An intercept

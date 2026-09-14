@@ -204,9 +204,10 @@ to `yeet` equivalents before they run.
 > tools. It used to reject all five with *"BLOCKED: use `yeet ...` instead"*, which
 > forced the model to reformulate every call as a Bash command — costing a turn each
 > time. A turn is the most expensive thing yeet can cause: re-sending the accumulated
-> context is worth roughly 32,000 billed input tokens, while condensing every tool
-> result in an entire session saves about 1,900. Measured end to end, the blocking
-> configuration cost **58% more** than running with no yeet at all.
+> context is expensive, while condensing every tool result in an entire session
+> recovers comparatively little. Measured end to end on real API cost, the blocking
+> configuration cost **35% more** than running with no yeet at all, while the current
+> hook set came in **6% cheaper** than no yeet in the same head-to-head run.
 > See [docs/benchmark-live-ab.md](docs/benchmark-live-ab.md).
 
 ### Option A — Project-level (this repo only)

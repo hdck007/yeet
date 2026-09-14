@@ -297,7 +297,7 @@ t_install_fresh() {
 
   # The native tools must be left alone. Blocking them cost the model a turn per
   # call, which is worth far more than the bytes a block saved -- the blocking
-  # configuration measured 58% worse than no yeet at all. If a future change
+  # configuration measured 35% more expensive than no yeet. If a future change
   # reintroduces a blocker, this fails.
   local blocked=0
   for m in Read Write Edit; do

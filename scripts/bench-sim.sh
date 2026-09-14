@@ -430,7 +430,9 @@ else
     printf "  %-11s %4s %12s %11s %8s %7s %7s %11s\n" "$arm" "$1" "$2" "$3" "$5" "$6" "$7" "$8"
   done
   say ""
-  say "  ${DIM}Billed input = input + cache-creation + cache-read. Negative = worse than native.${RESET}"
+  say "  ${DIM}Cost is the headline: it is what the API actually charges. Token counts are${RESET}"
+  say "  ${DIM}shown alongside, but summing input + cache-creation + cache-read at 1:1${RESET}"
+  say "  ${DIM}overweights cache reads, which bill at ~0.1x and dominate the raw count.${RESET}"
   say "  ${DIM}/usage utilization: $UTIL_N event(s), 1%-granular, account-wide — cannot resolve arms.${RESET}"
 fi
 
