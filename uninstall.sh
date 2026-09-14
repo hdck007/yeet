@@ -224,6 +224,7 @@ done
 HOOK_FILES=""
 for f in \
   "$CLAUDE_HOME/hooks/yeet-proxy.sh" \
+  "$CLAUDE_HOME/hooks/yeet-intercept.sh" \
   "$CLAUDE_HOME/hooks/yeet-rewrite.sh" \
   "$CLAUDE_HOME/hooks/yeet-failure.sh" \
   "$CLAUDE_HOME/yeet/yeet-proxy.sh" \
@@ -244,15 +245,23 @@ count_yeet_hooks() {
   $HAVE_JQ || { echo 0; return; }
   [ -f "$file" ] || { echo 0; return; }
   jq -e . "$file" >/dev/null 2>&1 || { echo 0; return; }
-  jq '[ (.hooks.PreToolUse // [])[] | select(
-        ._yeet == true
-        or ((.matcher // "") as $m
-            | ($m | test("^(Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit)$"))
-              and ((.hooks // []) | map(.command // "") | any(test("yeet"))))
-        or ((.matcher // "") == "Bash"
-            and ((.hooks // []) | map(.command // "")
-                 | any(test("yeet-proxy|yeet-rewrite|yeet rewrite"))))
-      ) ] | length' "$file" 2>/dev/null || echo 0
+  jq '
+# is_yeet_entry -- true for any hook entry this project has ever installed.
+# Deliberately broad: a leftover PreToolUse hook pointing at a yeet-proxy.sh that
+# uninstall has already deleted makes every Bash call fail, which bricks Claude
+# Code. A false negative is far worse than a false positive here.
+def is_yeet_entry:
+    (._yeet == true)
+    or (has("_yeetSchema"))
+    or ((.hooks // []) | map(.command // "") | any(
+          test("yeet[-_ ](proxy|intercept|rewrite)")
+        or test("[/]\\.?claude[/]hooks[/]yeet")
+        or test("[/]\\.yeet[/]")
+        or test("BLOCKED:.*yeet")
+        or test("(^|[^a-zA-Z0-9_])yeet[ ]+(read|grep|glob|ls|find|edit|write|smart|tree|diff|rewrite)")
+      ));
+    [ (.hooks // {}) | to_entries[] | .value[]? | select(is_yeet_entry) ] | length
+  ' "$file" 2>/dev/null || echo 0
 }
 
 SETTINGS_FILES="$CLAUDE_HOME/settings.json
@@ -470,16 +479,28 @@ for f in $DIRTY_SETTINGS; do
   fi
   TMP="$(mktemp)"
   if jq '
-    .hooks.PreToolUse |= map(select(
-      (._yeet == true
-       or ((.matcher // "") as $m
-           | ($m | test("^(Read|Glob|Grep|Write|Edit|MultiEdit|NotebookEdit)$"))
-             and ((.hooks // []) | map(.command // "") | any(test("yeet"))))
-       or ((.matcher // "") == "Bash"
-           and ((.hooks // []) | map(.command // "")
-                | any(test("yeet-proxy|yeet-rewrite|yeet rewrite"))))) | not))
-    | if (.hooks.PreToolUse | length) == 0 then del(.hooks.PreToolUse) else . end
-    | if (.hooks | length) == 0 then del(.hooks) else . end
+# is_yeet_entry -- true for any hook entry this project has ever installed.
+# Deliberately broad: a leftover PreToolUse hook pointing at a yeet-proxy.sh that
+# uninstall has already deleted makes every Bash call fail, which bricks Claude
+# Code. A false negative is far worse than a false positive here.
+def is_yeet_entry:
+    (._yeet == true)
+    or (has("_yeetSchema"))
+    or ((.hooks // []) | map(.command // "") | any(
+          test("yeet[-_ ](proxy|intercept|rewrite)")
+        or test("[/]\\.?claude[/]hooks[/]yeet")
+        or test("[/]\\.yeet[/]")
+        or test("BLOCKED:.*yeet")
+        or test("(^|[^a-zA-Z0-9_])yeet[ ]+(read|grep|glob|ls|find|edit|write|smart|tree|diff|rewrite)")
+      ));
+    # Sweep every hook event, not only PreToolUse: older installers also wrote
+    # PostToolUse and SessionStart entries that later versions never cleaned up.
+    if (.hooks | type) == "object" then
+      .hooks |= with_entries(.value |= map(select(is_yeet_entry | not)))
+      | .hooks |= with_entries(select((.value | length) > 0))
+    else . end
+    | if (.hooks? | type == "object") and (.hooks | length) == 0
+      then del(.hooks) else . end
   ' "$f" > "$TMP" 2>/dev/null && jq -e . "$TMP" >/dev/null 2>&1; then
     mv "$TMP" "$f"
     ok "Removed yeet hooks from $f"

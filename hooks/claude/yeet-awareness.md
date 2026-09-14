@@ -1,14 +1,40 @@
 # Yeet — Token-Optimized CLI Wrapper
 
-**Always use yeet commands. Never use raw Bash equivalents or built-in Read/Glob/Grep/Edit/Write tools.**
+**Prefer `yeet` for shell commands. The built-in tools are fine to use — they are
+not blocked.**
 
-## Mandatory replacements
+yeet used to block Read/Glob/Grep/Edit/Write outright. That was removed: each block
+forced you to reformulate the call as Bash, and a wasted turn costs far more than the
+bytes a block saved. Use whichever tool fits.
 
-| NEVER use | ALWAYS use instead |
-|---|---|
-| Read / Glob / Grep / Edit / Write tools | equivalent `yeet` command |
-| `cat` / `head` / `tail` | `yeet read <file>` |
-| `ls` / `find` / `grep -rn` | `yeet ls` / `yeet find` / `yeet grep` |
+## Where yeet helps
+
+| Instead of | Use | Why |
+|---|---|---|
+| `cat` / `head` / `tail` | `yeet read <file>` | language-aware filtering |
+| `ls` / `find` / `grep -rn` | `yeet ls` / `yeet find` / `yeet grep` | grouped, deduplicated |
+| `git status` / `diff` / `log` | `yeet git ...` | drops decoration, keeps content |
+| `npm` / `tsc` / `eslint` / test runners | `yeet npm` / `tsc` / `lint` / ... | failures only |
+
+The built-in `Read` tool already takes `offset` and `limit`, and you can edit a file
+you only partially read — so for a plain line range either tool is fine.
+
+`Grep` and `Glob` are answered with yeet's condensed output automatically; you do not
+need to call yeet yourself for those.
+
+## Reading condensed output
+
+Condensed output carries a marker:
+
+```
+<note-for-llms>Condensed by yeet, a token-optimising CLI wrapper. Some detail may be
+omitted; any totals shown count the full result.</note-for-llms>
+```
+
+It means the shape is deliberate, not a malfunction. Detail **may** be missing —
+`yeet grep` caps at 200 results, `yeet ps` shows the top processes — so if you need
+something that was omitted, re-running with `--raw` is correct. Headline counts
+("527 matches in 294F") are from the full result and can be trusted.
 
 ## Decision flow — always follow this order
 

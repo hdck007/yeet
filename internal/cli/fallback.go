@@ -101,11 +101,38 @@ func printBetter(raw, filtered string) bool {
 // stdout. Callers must record that number rather than the length of the
 // filtered string: when the fallback fires, the model received the raw output,
 // and logging the filtered length would book a saving that never happened.
-func printBetterN(raw, filtered string) (printed int, shorter bool) {
-	if len(filtered) < len(raw) {
-		fmt.Print(filtered)
-		return len(filtered), true
+// printBetterNoteN is printBetterN with an explanatory note prepended to the
+// condensed form. The note is counted in the comparison, so the "never worse
+// than raw" guarantee still holds: if note+filtered is not smaller than raw,
+// the raw output is printed and no note is emitted. Without this the note could
+// push a small condensed result past the raw one and silently disable filtering.
+func printBetterNoteN(raw, filtered, note string) (printed int, shorter bool) {
+	withNote := note + filtered
+	if len(withNote) < len(raw) {
+		fmt.Print(withNote)
+		return len(withNote), true
 	}
 	fmt.Print(raw)
 	return len(raw), false
+}
+
+// printBetterN prints whichever of raw/filtered is smaller, and marks a
+// condensed result with Note so the reader can tell a deliberate reshaping from
+// a broken command. Agents that could not tell the difference spent turns
+// diagnosing the tool (`which git`, `type git`) and re-running it; a turn costs
+// far more than the note. Every renderer routes through here, so this is the one
+// place the marker has to be applied.
+// noteMinRawBytes is the smallest raw output worth annotating. The note costs
+// ~95 bytes, which is more than the entire saving on a short result — and since
+// the note is counted in the size comparison, annotating a small result would
+// push the condensed form past raw and silently disable filtering. Short output
+// is also the case least likely to be mistaken for a broken command.
+const noteMinRawBytes = 400
+
+func printBetterN(raw, filtered string) (printed int, shorter bool) {
+	note := ""
+	if len(raw) >= noteMinRawBytes {
+		note = Note("")
+	}
+	return printBetterNoteN(raw, filtered, note)
 }

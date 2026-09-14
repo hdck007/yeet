@@ -42,18 +42,18 @@ func runDiffImpl(args []string) error {
 	defer cancel()
 
 	result := yeetexec.Run(ctx, "diff", "-u", file1, file2)
-	rawOutput := result.Stdout
+	cmdOut := result.Stdout
 
-	if rawOutput == "" && result.ExitCode == 0 {
+	if cmdOut == "" && result.ExitCode == 0 {
 		rendered := "files are identical\n"
-		improved := printBetter(rawOutput, rendered)
-		recordDiffAnalytics(args, rawOutput, rendered, improved, start)
+		improved := printBetter(cmdOut, rendered)
+		recordDiffAnalytics(args, cmdOut, rendered, improved, start)
 		return nil
 	}
 
-	rendered := filter.CompactDiff(rawOutput)
-	improved := printBetter(rawOutput, rendered)
-	recordDiffAnalytics(args, rawOutput, rendered, improved, start)
+	rendered := filter.CompactDiff(cmdOut)
+	improved := printBetter(cmdOut, rendered)
+	recordDiffAnalytics(args, cmdOut, rendered, improved, start)
 	return nil
 }
 

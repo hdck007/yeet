@@ -138,14 +138,15 @@ func runGlobImpl(args []string) error {
 
 	rendered := buf.String()
 	// Raw estimate: find command typically outputs full paths with metadata (~2x)
-	rawOutput := strings.Repeat("x", len(rendered)*2)
-	improved := printBetter(rawOutput, rendered)
+	estBaseline := strings.Repeat("x", len(rendered)*2)
+	improved := printBetter(estBaseline, rendered)
 
 	if improved && !noAnalytics && db != nil {
 		if err := db.RecordUsage(analytics.Usage{
 			Command:       "glob",
 			ArgsSummary:   strings.Join(args, " "),
-			CharsRaw:      len(rawOutput),
+			CharsRaw:      len(estBaseline),
+			BaselineKind:  analytics.BaselineSynthetic,
 			CharsRendered: len(rendered),
 			ExitCode:      0,
 			DurationMs:    time.Since(start).Milliseconds(),

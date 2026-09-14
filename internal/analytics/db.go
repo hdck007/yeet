@@ -49,7 +49,15 @@ func (d *DB) Conn() *sql.DB {
 	return d.conn
 }
 
+// dbFilePath resolves the analytics database location. YEET_DATA_DIR wins when
+// set: install.sh writes its manifest there, and the benchmark harnesses set it
+// per-arm expecting an isolated store. Before this it was ignored here, so a
+// benchmark run wrote straight into the operator's real analytics history and
+// every arm reported identical lifetime numbers.
 func dbFilePath() (string, error) {
+	if dir := os.Getenv("YEET_DATA_DIR"); dir != "" {
+		return filepath.Join(dir, "analytics.db"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("get home dir: %w", err)

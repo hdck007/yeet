@@ -88,6 +88,26 @@ var rules = []rewriteRule{
 	{prefix: "ps ", yeetPrefix: "yeet ps "},
 	{prefix: "du ", yeetPrefix: "yeet du "},
 
+	// `yeet tree` shipped as a command but nothing routed to it, so an agent
+	// typing `tree` got the raw output and none of the noise-dir filtering. It
+	// takes the native argument shape, so no translate is needed.
+	//
+	// `wc` is deliberately absent: `wc -l file` is already one line, so there is
+	// nothing to condense, and rewriting the `cat x | wc -l` shape would change
+	// the count because `yeet read` filters content before wc sees it.
+	{prefix: "tree ", yeetPrefix: "yeet tree "},
+	{prefix: "tree", yeetPrefix: "yeet tree", guard: guardBareOnly},
+
+	// `env` is rewritten ONLY when bare. `env FOO=bar some-cmd` *runs* a
+	// command with a modified environment; rewriting that to `yeet env` would
+	// silently not run it. Anything with arguments passes through.
+	{prefix: "env", yeetPrefix: "yeet env", guard: guardBareOnly},
+
+	// Deliberately NOT rewritten: `jq`. `yeet json` inspects structure without
+	// values, whereas jq evaluates a filter expression — `jq '.a.b[0]'` yields
+	// `1` while `yeet json` prints the shape. Routing one to the other returns
+	// the wrong answer, which is worse than not rewriting at all.
+
 	// Cluster and container inspection. Read-only subcommands only — the same
 	// boundary as git/gh, for the same reason.
 	{prefix: "kubectl ", yeetPrefix: "yeet kubectl ", guard: guardKubectl},
@@ -284,6 +304,16 @@ func guardNextBuild(fields []string) verdict {
 		return vNever
 	}
 	return vAsk
+}
+
+// guardBareOnly allows the rewrite only when the command has no arguments.
+// Used for families where the bare form is a read-only listing but an
+// argumented form does something else entirely (notably `env`).
+func guardBareOnly(fields []string) verdict {
+	if len(fields) != 1 {
+		return vNever
+	}
+	return vAllow
 }
 
 func guardPackageManager(fields []string) verdict {

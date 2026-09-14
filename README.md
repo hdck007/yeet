@@ -166,17 +166,51 @@ yeet and compares the tokens the API actually billed:
 bash scripts/bench-live.sh --reps 3
 ```
 
-Your `~/.claude` is never touched: each arm gets its own throwaway `CLAUDE_CONFIG_DIR`,
-and the yeet arm is built by running `install.sh` against it. Runs alternate between
-arms so cache warmth is shared, and any run that used yeet in the native arm, skipped
-yeet in the yeet arm, or failed to finish the task is reported and excluded. Costs real
-money — it asks first.
+Your `~/.claude` is never modified. Arms are expressed with `--settings` rather than a
+throwaway `CLAUDE_CONFIG_DIR` — an isolated config dir holds no credentials, so every
+session would fail *"Not logged in"*. Runs alternate between arms so cache warmth is
+shared, and any run that used yeet in the native arm, skipped it in the yeet arm, or
+failed to finish the task is reported and excluded. Costs real money — it asks first.
+
+`scripts/bench-sim.sh` is the same idea with a pristine copy of the target per run, so
+an edit-and-git workload cannot contaminate later runs, and `--yeet-bin` to pin the
+binary under test.
+
+**Over a week of your own work** — the honest instrument. A single synthetic task on one
+repo cannot settle this, because yeet's edge measured ~0.8% per turn on search/read/edit
+work and session cost swings by over 50% with the task:
+
+```bash
+eval "$(bash scripts/yeet-ab.sh shell-init)"   # adds `claude --yeet`
+claude --yeet          # session recorded in the yeet arm
+claude                 # session recorded without yeet
+bash scripts/yeet-ab.sh report --since 7d
+```
+
+Every session lands in a datalake at `~/.local/share/yeet/ab/sessions/` with totals,
+per-turn usage, every tool call, and diagnostic signals — failures, repeated
+invocations, bypasses (`command git`, `which git`), truncation, and outlier result
+sizes. `yeet-ab export --csv` dumps it for outside analysis.
 
 ---
 
 ## 🤖 Claude Code Setup
 
-Two layers work together: **blockers** prevent Claude from using native tools directly, **proxy hook** silently rewrites raw Bash commands to `yeet` equivalents.
+Two layers work together: an **intercept hook** answers `Grep`/`Glob` with yeet's
+condensed output in the same turn, and a **proxy hook** rewrites raw Bash commands
+to `yeet` equivalents before they run.
+
+> **Changed:** yeet no longer blocks the native `Read`/`Write`/`Edit`/`Grep`/`Glob`
+> tools. It used to reject all five with *"BLOCKED: use `yeet ...` instead"*, which
+> forced the model to reformulate every call as a Bash command — costing a turn each
+> time. A turn is the most expensive thing yeet can cause: re-sending the accumulated
+> context is expensive, while condensing every tool result in an entire session
+> recovers comparatively little. Measured end to end on real API cost, the blocking
+> configuration cost **35% more** than running with no yeet at all — it ran 16 turns
+> where no-yeet ran 11. The current hook set shows **no measurable difference** from
+> running without yeet on that workload; the benchmark's run-to-run noise is larger
+> than the effect. See [docs/benchmark-live-ab.md](docs/benchmark-live-ab.md) for the
+> method, the noise floor, and what it can and cannot resolve.
 
 ### Option A — Project-level (this repo only)
 
@@ -198,20 +232,38 @@ bash scripts/install.sh --plugin --global
 
 | Component | Flag | What it does |
 |-----------|------|--------------|
-| PreToolUse blockers | `--claude` | Blocks native Read/Glob/Grep/Write/Edit tools |
-| `yeet-proxy.sh` | `--plugin` | Rewrites `cat`/`grep` Bash calls to `yeet` before execution |
+| `yeet-intercept.sh` | `--claude` | Answers `Grep`/`Glob` with yeet output in the same turn |
+| `yeet-proxy.sh` | `--plugin` | Rewrites `cat`/`grep`/`git` Bash calls to `yeet` before execution |
 
 After setup:
 
 ```
-Native Read tool      →  BLOCKED
-Native Grep tool      →  BLOCKED
-Native Glob tool      →  BLOCKED
-Native Write tool     →  BLOCKED
-Native Edit tool      →  BLOCKED
+Native Read tool      →  runs normally (it already takes offset + limit)
+Native Write tool     →  runs normally
+Native Edit tool      →  runs normally
+Native Grep tool      →  answered with `yeet grep` output, same turn
+Native Glob tool      →  answered with `yeet glob` output, same turn
 Bash: cat file.go     →  yeet read file.go    (rewritten silently)
 Bash: grep foo .      →  yeet grep foo .      (rewritten silently)
+Bash: git diff        →  yeet git diff        (rewritten silently)
 ```
+
+The intercept passes straight through whenever yeet cannot serve the request
+faithfully — `output_mode: files_with_matches` or `count` (yeet grep has neither),
+any `glob`/`type` filter, or empty output. An intercept that answers a different
+question than the one asked is worse than none, because the model just runs the
+search itself and pays the turn anyway.
+
+Condensed output carries a one-line marker so a reader can tell a deliberate
+reshaping from a broken command:
+
+```
+<note-for-llms>Condensed by yeet, a token-optimising CLI wrapper. Some detail may
+be omitted; any totals shown count the full result.</note-for-llms>
+```
+
+It is only added when the raw output is ≥400 bytes, and its size counts toward the
+never-worse comparison, so it can never push a condensed result past the raw one.
 
 `jq` is required for the proxy hook and auto-installed if missing.
 
