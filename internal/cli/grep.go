@@ -44,6 +44,7 @@ func init() {
 	grepCmd.Flags().IntVar(&grepLineMaxLen, "max-line-len", 80, "Max chars per line")
 	grepCmd.Flags().IntVar(&grepMaxPerFile, "max-per-file", 25, "Max matches shown per file")
 	grepCmd.Flags().IntVarP(&grepContextLines, "context", "C", 0, "Lines of context around each match")
+	grepCmd.Flags().BoolVarP(&grepFilesOnly, "files-with-matches", "l", false, "List only the files that contain a match")
 	rootCmd.AddCommand(grepCmd)
 }
 
@@ -51,6 +52,13 @@ type grepMatch struct {
 	lineNum string
 	content string
 }
+
+// grepFilesOnly mirrors grep -l. Without it, `yeet grep -l pattern .` failed with
+// "unknown shorthand flag: 'l'" -- and -l is one of the most common grep idioms,
+// so an agent reaching for it by habit lost a turn to an error. The PreToolUse
+// intercept also had to pass Grep(output_mode=files_with_matches) straight
+// through for want of an equivalent here.
+var grepFilesOnly bool
 
 func runGrep(cmd *cobra.Command, args []string) error {
 	start := time.Now()
@@ -171,6 +179,27 @@ func runGrep(cmd *cobra.Command, args []string) error {
 	sort.Strings(fileOrder)
 
 	var buf bytes.Buffer
+
+	// -l: just the paths, one per line, so the output stays pipeable into
+	// `wc -l` and friends the way real grep -l is. cmdOut here is the full match
+	// listing, so the never-worse comparison still picks this shorter form; it
+	// only falls back if the filtered list somehow came out larger.
+	if grepFilesOnly {
+		for _, file := range fileOrder {
+			fmt.Fprintln(&buf, file)
+		}
+		rendered := buf.String()
+		if rawOutput {
+			rendered = cmdOut
+		}
+		// No note in -l mode. The output is a machine-readable path list whose
+		// whole purpose is to be piped -- `grep -l ... | wc -l` is the common
+		// idiom -- and a prepended note silently adds one to every count.
+		printed, _ := printBetterNoteN(cmdOut, rendered, "")
+		trackAnalytics(start, args, cmdOut, rendered, printed, result.ExitCode)
+		return nil
+	}
+
 	fmt.Fprintf(&buf, "%d matches in %dF:\n\n", total, len(fileOrder))
 
 	shown := 0

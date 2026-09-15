@@ -55,7 +55,8 @@ while, ask before wiping it — `--keep-data` costs nothing and stats are not re
   (`command -v` only reports the first hit), and probes `/usr/local/bin`,
   `/opt/homebrew/bin`, `~/.local/bin`, `~/bin`, `~/go/bin`, and `$(go env GOPATH)/bin`.
   It only ever deletes a file that identifies itself as yeet when run.
-- `~/.claude/hooks/yeet-proxy.sh` and legacy `yeet-rewrite.sh` / `yeet-failure.sh`.
+- `~/.claude/hooks/yeet-proxy.sh`, `yeet-intercept.sh`, and legacy
+  `yeet-rewrite.sh` / `yeet-failure.sh`.
 - yeet hook entries from `~/.claude/settings.json` and `settings.local.json` — both the
   `_yeet`-tagged ones and unmarked legacy entries identified by content. Everything
   else in those files is preserved.
@@ -70,7 +71,7 @@ while, ask before wiping it — `--keep-data` costs nothing and stats are not re
 ## Afterwards
 
 Tell the user to **restart Claude Code** — a running session keeps the old hooks in
-memory, so Read/Grep/Edit stay blocked until it restarts. In the current shell,
+memory until it restarts. In the current shell,
 `hash -r` clears the cached path to the deleted binary.
 
 ## If it reports leftovers
@@ -87,7 +88,19 @@ If something still survives, that is a bug worth reporting with the printed list
 
 ## Common situations
 
-**"I only want the tool blockers gone, keep the binary"** — there is no flag for that.
+**"I only want the tool blockers gone, keep the binary"** — current versions do not
+block any native tool, so there is nothing to remove. On an old install, re-running
+`install.sh` replaces the blockers with the current 3-hook set and keeps the binary.
+
+**Hook removal is exhaustive.** The matcher sweeps every hook event (not just
+`PreToolUse`) and recognises the `_yeet`/`_yeetSchema` markers, any
+`yeet-proxy`/`yeet-intercept`/`yeet-rewrite` command, paths under `.claude/hooks/yeet`
+or `~/.yeet`, `BLOCKED`-style messages, and direct `yeet <verb>` invocations. It errs
+broad on purpose: a leftover hook pointing at a deleted `yeet-proxy.sh` makes **every**
+Bash call fail, which bricks Claude Code, whereas a false positive only drops a hook
+that called yeet.
+
+**"I only want the tool blockers gone, keep the binary" (legacy phrasing)** — there is no flag for that.
 Uninstall fully, then reinstall with `--binary-only`.
 
 **"Nothing to uninstall" but yeet still works** — the binary is somewhere unusual.

@@ -89,11 +89,74 @@ where yeet acts) and end in a checkable fact. A task that is mostly reasoning wi
 tool calls will show little difference, which is a true result about that task, not
 evidence against yeet.
 
+## Live — a week of your own work (`scripts/yeet-ab.sh`)
+
+The most honest instrument, and the one to reach for when someone asks whether yeet
+is worth it. A single synthetic task cannot settle it: yeet's edge measured **~0.8%
+per turn** on search/read/edit work, while session cost swings over 50% with the
+task. So sample real work instead.
+
+```bash
+eval "$(bash scripts/yeet-ab.sh shell-init)"   # gives `claude --yeet`
+claude --yeet        # recorded in the yeet arm
+claude               # recorded without yeet
+bash scripts/yeet-ab.sh report --since 7d
+bash scripts/yeet-ab.sh export --csv
+```
+
+Each session lands in a datalake with totals, per-turn usage, every tool call, and
+diagnostic signals: failures, repeated identical invocations, bypasses
+(`command git`, `which git`), truncation admissions, and outlier result sizes.
+Report **billed per turn**, not per session — session totals mostly track how long
+the task ran. Do not read the comparison below ~20 sessions per arm.
+
+## What the live A/B actually found
+
+Quote these rather than re-deriving them (full method in `docs/benchmark-live-ab.md`):
+
+- **Report cost, never a raw token sum.** `input + cache_creation + cache_read`
+  added at 1:1 is dominated by cache reads, which bill at ~0.1x, while cache
+  creation bills at ~1.25x, so the sum mostly measures the cheapest class and can
+  point the opposite way to the bill. Use `total_cost_usd` from the API.
+- **Do not build an argument on cache_creation.** It is the expensive class, so it
+  is tempting, but it swings 3x between identical runs (8,554 to 27,563). An
+  apparent "yeet writes 38% more cache" finding turned out to be a warmup artifact:
+  a plain no-yeet warmup session produced 12,704, the same value that had been read
+  as a yeet defect.
+- **Turns dominate everything else.** Each extra turn re-sends the whole
+  accumulated context, which costs far more than condensing tool output recovers.
+- **Tool output is only ~4% of billed context.** The rest is the system prompt, tool
+  schemas and message history. Compressing a 4% slice by 20% is worth ~0.8%.
+- **The blocking hook set cost 35% MORE than no yeet at all** (real API cost) and has
+  been removed. It ran 16 turns where no-yeet ran 11 -- a countable mechanism, which
+  is why that number survives the noise below.
+- **The current set shows no measurable difference from no yeet** on a
+  search/read/edit/git workload. Do not quote a percentage for it.
+- **Discard warmup sessions.** The first session of a fresh benchmark reports far more
+  cache_creation than later ones (33,360 vs ~9,000), and whichever arm draws the first
+  slot is charged for it. `bench-sim.sh --warmup N` runs and throws away sessions first.
+- **cache_creation is noisy even warm** -- 8,554 to 27,563 across identical runs. A
+  single outlier there moved one arm from "cheaper than native" to "+11.7%".
+- Offline says 74%, live says roughly break-even. Both are correct — offline scores
+  against raw `grep -rn` output that an agent would rarely receive, because it would
+  use the native `Grep` tool instead.
+
+## Do not use `/usage`
+
+`rate_limit_event.utilization` is what `/usage` displays. It is 1%-granular,
+account-wide, and emitted only on threshold crossings — one session moves it by
+roughly one granule, and any other session on the account contaminates it. Exact
+per-session token counts from the transcript are the only workable instrument.
+
 ## Reporting numbers honestly
 
 - Quote the offline percentage with the case mix and target repo named — it is specific
   to both.
 - Never quote a live result from a single rep, and never quote one while runs were
   excluded without saying how many.
-- `yeet stats` shows the user's own cumulative savings from real use. That is the most
-  persuasive number available and costs nothing to read.
+- `yeet stats` shows the user's own cumulative savings from real use. Read it as
+  bytes-per-command, not as task cost — and note that `find`/`glob` rows were logged
+  from a hardcoded 2x estimate before they were marked `BaselineSynthetic`, so older
+  histories overstate those two.
+- Never quote a live result from a single rep, and never quote one while runs were
+  excluded without saying how many.
