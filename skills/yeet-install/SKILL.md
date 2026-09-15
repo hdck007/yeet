@@ -9,6 +9,25 @@ description: Install or upgrade yeet — the token-optimized CLI wrapper — and
 records everything it does in a manifest, verifies itself, and rolls back on failure.
 Never hand-edit `~/.claude/settings.json` to add yeet hooks — the installer owns that.
 
+## What the hook set is now (changed)
+
+yeet installs **3** hooks, not 6. It used to block `Read`, `Glob`, `Grep`, `Write`
+and `Edit` with *"BLOCKED: use `yeet ...` instead"*. Measured end to end, that cost
+**35% more** in real API cost than running with no yeet at all: each block forces
+the model to reformulate the call as Bash, and every extra turn re-sends the whole
+accumulated context -- that arm ran 16 turns where no-yeet ran 11. The current
+3-hook set shows no measurable difference from no yeet on that workload; the
+benchmark noise exceeds the effect. See docs/benchmark-live-ab.md.
+
+| matcher | behaviour |
+|---|---|
+| `Grep`, `Glob` | intercepted — answered with yeet output in the same turn, passes through when yeet cannot serve the request faithfully |
+| `Bash` | rewritten by `yeet-proxy.sh` |
+| `Read`, `Write`, `Edit` | **not hooked** — native Read takes `offset`/`limit`, and a partially read file can still be edited |
+
+If a user reports that Read/Grep/Edit are blocked, they are on an old install —
+re-run the installer, which strips every legacy hook shape before writing the new set.
+
 ## The one-liner
 
 ```bash
@@ -53,8 +72,10 @@ bash install.sh --yes
 - `/usr/local/bin/yeet` — falls back to `~/.local/bin` when that is not writable and
   sudo is unavailable, and warns if that directory is not on PATH.
 - `~/.claude/hooks/yeet-proxy.sh` — the PreToolUse hook that rewrites bash commands.
+- `~/.claude/hooks/yeet-intercept.sh` — answers `Grep`/`Glob` with yeet's condensed
+  output in the same turn, and passes through when yeet cannot serve the request.
 - `~/.claude/settings.json` — six hook entries, each tagged `"_yeet": true`, prepended
-  so the blockers win. Also sets `autoCompactThreshold` to 100000 and, with auto-allow,
+  so the awareness wins. Also sets `autoCompactThreshold` to 100000 and, with auto-allow,
   adds `Bash(yeet:*)` to `permissions.allow`.
 - `~/.claude/yeet-awareness.md` plus `@yeet-awareness.md` as the **first line** of
   `~/.claude/CLAUDE.md`, so it outranks other instructions.
@@ -79,7 +100,7 @@ identifies itself as yeet). If it was declined, re-run with `--yes`.
 
 **"The hooks aren't firing"** — check in this order:
 ```bash
-jq '[.hooks.PreToolUse[] | select(._yeet == true)] | length' ~/.claude/settings.json  # expect 6
+jq '[.hooks.PreToolUse[] | select(._yeet == true)] | length' ~/.claude/settings.json  # expect 3
 head -1 ~/.claude/CLAUDE.md                                                          # expect @yeet-awareness.md
 printf '%s' '{"tool_name":"Bash","tool_input":{"command":"true"}}' | bash ~/.claude/hooks/yeet-proxy.sh
 ```
